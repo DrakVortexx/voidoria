@@ -2,15 +2,65 @@ const express = require("express");
 const prisma = require("../db");
 const { requireAuth } = require("../middleware/auth");
 const { calculateLevelUp } = require("../services/game");
+const { isNonNegInt, isPosInt, sanitizeString } = require("../middleware/validate");
 
 const router = express.Router();
 
+const MAX_TRADE_ITEMS = 50;
+const MAX_ITEM_QTY = 999;
+
+function validateTradeItems(payload, field) {
+  const raw = payload[field];
+  if (raw === undefined) return { items: [], error: null };
+  if (!Array.isArray(raw) || raw.length > MAX_TRADE_ITEMS) {
+    return { items: [], error: `${field} must be an array of at most ${MAX_TRADE_ITEMS} items` };
+  }
+
+  const items = [];
+  const seen = new Set();
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") {
+      return { items: [], error: `Invalid entry in ${field}` };
+    }
+    const itemId = sanitizeString(entry.itemId, 64);
+    const qty = Number(entry.quantity ?? 1);
+    if (!itemId || !isPosInt(qty) || qty > MAX_ITEM_QTY) {
+      return { items: [], error: `Invalid item or quantity in ${field}` };
+    }
+    if (seen.has(itemId)) {
+      return { items: [], error: `Duplicate item in ${field}` };
+    }
+    seen.add(itemId);
+    items.push({ itemId, quantity: qty });
+  }
+
+  return { items, error: null };
+}
+
 router.post("/create", requireAuth, async (req, res) => {
   try {
-    const { receiverUsername, offerCoins = 0, requestCoins = 0, offerItems = [], requestItems = [] } = req.body;
+    const payload = req.body || {};
+    const receiverUsername = sanitizeString(payload.receiverUsername, 20);
+    const offerCoins = Number(payload.offerCoins ?? 0);
+    const requestCoins = Number(payload.requestCoins ?? 0);
+
+    const offerCheck = validateTradeItems(payload, "offerItems");
+    const requestCheck = validateTradeItems(payload, "requestItems");
+    if (offerCheck.error) return res.status(400).json({ error: offerCheck.error });
+    if (requestCheck.error) return res.status(400).json({ error: requestCheck.error });
+    const offerItems = offerCheck.items;
+    const requestItems = requestCheck.items;
 
     if (!receiverUsername) {
       return res.status(400).json({ error: "Receiver username is required" });
+    }
+
+    if (!isNonNegInt(offerCoins) || !isNonNegInt(requestCoins)) {
+      return res.status(400).json({ error: "Coin amounts must be non-negative integers" });
+    }
+
+    if (offerCoins === 0 && requestCoins === 0 && offerItems.length === 0 && requestItems.length === 0) {
+      return res.status(400).json({ error: "Trade must include coins or items" });
     }
 
     const receiverUser = await prisma.user.findUnique({
@@ -26,12 +76,12 @@ router.post("/create", requireAuth, async (req, res) => {
       return res.status(400).json({ error: "Cannot trade with yourself" });
     }
 
-    if (offerCoins < 0 || requestCoins < 0) {
-      return res.status(400).json({ error: "Coin amounts cannot be negative" });
-    }
-
     if (offerCoins > req.player.coins) {
       return res.status(400).json({ error: "Not enough coins to offer" });
+    }
+
+    if (requestCoins > receiverUser.player.coins) {
+      return res.status(400).json({ error: "Receiver doesn't have enough coins" });
     }
 
     for (const item of offerItems) {
@@ -170,10 +220,9 @@ router.post("/:tradeId/accept", requireAuth, async (req, res) => {
       await tx.player.update({
         where: { id: trade.senderId },
         data: {
-          coins: { decrement: trade.offerCoins },
+          coins: { increment: trade.requestCoins - trade.offerCoins + senderLevel.coinBonus },
           level: senderLevel.level,
           xp: senderLevel.xp,
-          coins: { increment: senderLevel.coinBonus },
         },
       });
       await tx.player.update({

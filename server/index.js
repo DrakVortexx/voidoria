@@ -1,8 +1,8 @@
 const express = require("express");
 const cookieParser = require("cookie-parser");
 const path = require("path");
-const { securityMiddleware } = require("./middleware/security");
 const { execSync } = require("child_process");
+const { securityMiddleware } = require("./middleware/security");
 const { startup } = require("../prisma/startup");
 
 const app = express();
@@ -10,7 +10,7 @@ const PORT = process.env.PORT || 3000;
 
 securityMiddleware(app);
 
-app.use(express.json());
+app.use(express.json({ limit: "100kb" }));
 app.use(cookieParser());
 
 app.use(express.static(path.join(__dirname, "..", "public")));
@@ -34,18 +34,27 @@ app.get("*", (req, res) => {
   }
 });
 
+app.use((req, res) => {
+  res.status(404).json({ error: "Not found" });
+});
+
 app.use((err, req, res, next) => {
   console.error("Unhandled error:", err);
   res.status(500).json({ error: "Internal server error" });
 });
 
 async function main() {
-  try {
-    console.log("Syncing database schema...");
-    execSync("npx prisma db push --skip-generate", { stdio: "inherit" });
-    console.log("Schema synced.");
-  } catch (err) {
-    console.error("Schema sync failed:", err.message);
+  const isProduction = process.env.NODE_ENV === "production";
+  const autoPush = process.env.AUTO_PUSH_SCHEMA !== "false";
+
+  if (!isProduction && autoPush) {
+    try {
+      console.log("Syncing database schema...");
+      execSync("npx prisma db push --skip-generate", { stdio: "inherit" });
+      console.log("Schema synced.");
+    } catch (err) {
+      console.error("Schema sync failed:", err.message);
+    }
   }
 
   await startup();

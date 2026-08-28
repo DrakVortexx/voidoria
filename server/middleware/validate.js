@@ -38,4 +38,19 @@ function isValidPassword(password) {
   return typeof password === "string" && password.length >= 6 && password.length <= 128;
 }
 
-module.exports = { validateBody, sanitizeString, isValidEmail, isValidUsername, isValidPassword };
+function toInt(value) {
+  const n = Number(value);
+  return Number.isInteger(n) ? n : NaN;
+}
+
+function isPosInt(value) {
+  const n = Number(value);
+  return Number.isInteger(n) && n > 0;
+}
+
+function isNonNegInt(value) {
+  const n = Number(value);
+  return Number.isInteger(n) && n >= 0;
+}
+
+module.exports = { validateBody, sanitizeString, isValidEmail, isValidUsername, isValidPassword, toInt, isPosInt, isNonNegInt };

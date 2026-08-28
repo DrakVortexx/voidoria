@@ -264,6 +264,11 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);min-height:1
 .job-earnings{font-family:var(--mono);font-size:.84rem;color:var(--yellow)}
 .job-timer{font-family:var(--mono);font-size:1.3rem;font-weight:700;color:#fff;margin:6px 0}
 .job-actions{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
+.job-note{font-size:.76rem;color:var(--red);margin-top:6px}
+.job-daily{font-size:.82rem;color:var(--muted);margin-top:4px}
+.job-daily strong{color:var(--green)}
+.job-daily-sub{color:var(--muted);font-size:.76rem}
+.job-rt{font-family:var(--mono);font-size:.78rem;color:var(--accent);font-weight:600}
 
 /* ---- Admin ---- */
 .admin-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}

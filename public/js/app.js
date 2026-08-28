@@ -5,6 +5,12 @@ var App = {
 
   async init() {
     Auth.init();
+    var self = this;
+    document.addEventListener("click", function(e) {
+      if (e.target.classList && e.target.classList.contains("modal-overlay")) {
+        e.target.classList.add("hidden");
+      }
+    });
     await this.loadGame();
   },
 
@@ -40,7 +46,7 @@ var App = {
 
   showAdminTab() {
     var adminTab = document.querySelector(".tab-admin");
-    if (this.user && this.user.username === "admin") {
+    if (this.user && this.user.isAdmin) {
       adminTab.classList.remove("hidden");
     } else {
       adminTab.classList.add("hidden");
@@ -48,6 +54,9 @@ var App = {
   },
 
   bindTabs() {
+    if (this._tabsBound) return;
+    this._tabsBound = true;
+
     var self = this;
     document.querySelectorAll(".tab").forEach(function(btn) {
       btn.addEventListener("click", function() {
@@ -387,20 +396,19 @@ var App = {
       var res = await API.getJobs();
       var jobs = res.jobs;
       var activeJob = res.activeJob;
+      var daily = res.daily || { cap: 0, remaining: 0 };
+      var maxSession = 8 * 3600;
 
       var fullHTML = '';
 
       if (activeJob && res.earnings) {
         var e = res.earnings;
-        var rate = e.rate;
-        var xpRate = e.xpRate;
-        var elapsed = e.elapsed;
-
         fullHTML +=
           '<div class="job-status">' +
-            '<h3>Working: ' + activeJob.replace(/_/g, " ").replace(/\b\w/g, function(c) { return c.toUpperCase(); }) + '</h3>' +
-            '<div class="job-earnings">+$' + rate.toLocaleString() + '/sec &middot; +' + xpRate.toFixed(1) + ' XP/sec</div>' +
-            '<div class="job-timer" id="job-timer">' + self.formatTime(elapsed) + '</div>' +
+            '<h3>Working: ' + self.titleCase(e.jobName || activeJob) + '</h3>' +
+            '<div class="job-earnings">+$' + e.rate.toLocaleString() + '/sec &middot; +' + e.xpRate.toFixed(1) + ' XP/sec</div>' +
+            '<div class="job-timer" id="job-timer">' + self.formatTime(e.elapsed) + '</div>' +
+            (e.capped ? '<div class="job-note">Session capped (8h) &middot; collect earnings to make room for more.</div>' : '') +
             '<div class="job-earnings" id="job-earned">Earned: $' + e.coinsEarned.toLocaleString() + ' &middot; ' + e.xpEarned + ' XP</div>' +
             '<div class="job-actions">' +
               '<button id="collect-btn" class="btn btn-primary">Collect Earnings</button>' +
@@ -409,16 +417,20 @@ var App = {
           '</div>';
       }
 
-      fullHTML += '<h3 style="margin:16px 0 12px;font-size:.95rem">' + (activeJob ? 'Available Jobs' : 'Choose a Job') + '</h3><div class="job-grid">';
+      fullHTML +=
+        '<div class="job-daily">Daily cap remaining: <strong>$' + daily.remaining.toLocaleString() + '</strong> <span class="job-daily-sub">of $' + daily.cap.toLocaleString() + '/day</span></div>' +
+        '<h3 style="margin:16px 0 12px;font-size:.95rem">' + (activeJob ? 'Available Jobs' : 'Choose a Job') + '</h3><div class="job-grid">';
+
       jobs.forEach(function(j) {
         var isActive = activeJob === j.id;
         var card = '<div class="card job-card">' +
           '<h4>' + j.name + '</h4>' +
           '<p class="job-desc">' + j.description + '</p>' +
+          '<div class="job-rt">$' + j.coinsPerSec.toLocaleString() + '/sec &middot; ' + j.xpPerSec.toFixed(1) + ' XP/sec</div>' +
           '<span class="job-req ' + (j.unlocked ? "unlocked" : "") + '">' +
             (j.unlocked ? "Unlocked" : "Requires Lv." + j.levelReq) +
           '</span>';
-        if (!activeJob && j.unlocked) {
+        if (!activeJob && j.unlocked && daily.remaining > 0) {
           card += '<button class="btn btn-primary btn-sm start-job-btn" data-job="' + j.id + '">Start</button>';
         }
         if (isActive) {
@@ -432,13 +444,21 @@ var App = {
       content.innerHTML = fullHTML;
 
       if (activeJob && res.earnings) {
+        var rate = res.earnings.rate;
+        var xpRate = res.earnings.xpRate;
+        var elapsed = Math.min(res.earnings.elapsed, maxSession);
+        var capped = res.earnings.capped;
+
         self.jobInterval = setInterval(function() {
-          res.earnings.elapsed++;
-          var coins = res.earnings.elapsed * rate;
-          var xp = Math.floor(res.earnings.elapsed * xpRate);
+          if (!capped) {
+            elapsed++;
+            if (elapsed >= maxSession) capped = true;
+          }
+          var coins = elapsed * rate;
+          var xp = Math.floor(elapsed * xpRate);
           var timerEl = document.getElementById("job-timer");
           var earnedEl = document.getElementById("job-earned");
-          if (timerEl) timerEl.textContent = self.formatTime(res.earnings.elapsed);
+          if (timerEl) timerEl.textContent = self.formatTime(elapsed);
           if (earnedEl) earnedEl.textContent = 'Earned: $' + coins.toLocaleString() + ' &middot; ' + xp + ' XP';
         }, 1000);
 
@@ -449,6 +469,7 @@ var App = {
             self.player.level = r.newLevel || self.player.level;
             self.updateHeader();
             UI.toast(r.message, "success");
+            if (r.cappedByDaily) UI.toast("Daily job cap reached — come back tomorrow.", "info");
             self.handleLevelUp(r);
             self.loadJobs();
           } catch (err) {
@@ -463,6 +484,7 @@ var App = {
             self.player.level = r.newLevel || self.player.level;
             self.updateHeader();
             UI.toast(r.message, "success");
+            if (r.cappedByDaily) UI.toast("Daily job cap reached — come back tomorrow.", "info");
             self.handleLevelUp(r);
             self.loadJobs();
           } catch (err) {
@@ -485,6 +507,10 @@ var App = {
     } catch (err) {
       content.innerHTML = '<div class="error-msg">Failed to load jobs: ' + err.message + '</div>';
     }
+  },
+
+  titleCase(str) {
+    return String(str || "").replace(/_/g, " ").replace(/\b\w/g, function(c) { return c.toUpperCase(); });
   },
 
   formatTime(seconds) {
@@ -715,7 +741,7 @@ var App = {
     var self = this;
     var content = document.getElementById("admin-tab");
 
-    if (!this.user || this.user.username !== "drakvortexx") {
+    if (!this.user || !this.user.isAdmin) {
       content.innerHTML = '<div class="error-msg">Admin access denied</div>';
       return;
     }

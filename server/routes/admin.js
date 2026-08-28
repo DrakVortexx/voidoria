@@ -1,10 +1,9 @@
 const express = require("express");
 const prisma = require("../db");
 const { requireAuth } = require("../middleware/auth");
+const { ADMIN_USERNAME } = require("../config");
 
 const router = express.Router();
-
-const ADMIN_USERNAME = "admin";
 
 function requireAdmin(req, res, next) {
   if (!req.user || req.user.username !== ADMIN_USERNAME) {

@@ -6,11 +6,37 @@ const { calculateLevelUp } = require("../services/game");
 const router = express.Router();
 
 const AUCTION_EXPIRY_DAYS = 7;
+const MIN_PRICE = 1;
+const MAX_PRICE = 100000000;
+
+async function expireOverdueListings() {
+  const overdue = await prisma.auctionListing.findMany({
+    where: { status: "ACTIVE", expiresAt: { lt: new Date() } },
+  });
+
+  for (const listing of overdue) {
+    await prisma.$transaction(async (tx) => {
+      const claimed = await tx.auctionListing.updateMany({
+        where: { id: listing.id, status: "ACTIVE" },
+        data: { status: "EXPIRED" },
+      });
+      if (claimed.count > 0) {
+        await tx.inventory.upsert({
+          where: { playerId_itemId: { playerId: listing.sellerId, itemId: listing.itemId } },
+          update: { quantity: { increment: listing.quantity } },
+          create: { playerId: listing.sellerId, itemId: listing.itemId, quantity: listing.quantity },
+        });
+      }
+    });
+  }
+}
 
 router.get("/", requireAuth, async (req, res) => {
   try {
+    await expireOverdueListings();
+
     const listings = await prisma.auctionListing.findMany({
-      where: { status: "ACTIVE" },
+      where: { status: "ACTIVE", expiresAt: { gt: new Date() } },
       include: {
         item: true,
         seller: { include: { user: { select: { username: true } } } },
@@ -26,10 +52,20 @@ router.get("/", requireAuth, async (req, res) => {
 
 router.post("/list", requireAuth, async (req, res) => {
   try {
-    const { inventoryId, quantity = 1, price } = req.body;
+    const { inventoryId } = req.body;
+    const quantity = Number(req.body.quantity ?? 1);
+    const price = Number(req.body.price);
 
-    if (!inventoryId || !price || price < 1 || quantity < 1) {
-      return res.status(400).json({ error: "Invalid listing parameters" });
+    if (!inventoryId || !Number.isInteger(quantity) || quantity < 1 || quantity > 99) {
+      return res.status(400).json({ error: "Invalid listing parameters (quantity 1-99)" });
+    }
+
+    if (!Number.isInteger(price) || price < MIN_PRICE || price > MAX_PRICE) {
+      return res.status(400).json({ error: `Price must be between $${MIN_PRICE.toLocaleString()} and $${MAX_PRICE.toLocaleString()}` });
+    }
+
+    if (typeof inventoryId !== "string" || inventoryId.length > 64) {
+      return res.status(400).json({ error: "Invalid inventory item" });
     }
 
     const inventoryItem = await prisma.inventory.findUnique({
@@ -122,10 +158,9 @@ router.post("/buy/:id", requireAuth, async (req, res) => {
       await tx.player.update({
         where: { id: req.player.id },
         data: {
-          coins: { decrement: totalCost },
+          coins: { increment: buyerLevel.coinBonus - totalCost },
           level: buyerLevel.level,
           xp: buyerLevel.xp,
-          ...(buyerLevel.coinBonus > 0 ? { coins: { increment: buyerLevel.coinBonus } } : {}),
         },
       });
 

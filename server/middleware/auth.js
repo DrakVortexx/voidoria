@@ -1,8 +1,9 @@
 const prisma = require("../db");
+const { COOKIE_NAME } = require("../config");
 
 async function requireAuth(req, res, next) {
   try {
-    const token = req.cookies?.session_token;
+    const token = req.cookies?.[COOKIE_NAME];
     if (!token) {
       return res.status(401).json({ error: "Not authenticated" });
     }

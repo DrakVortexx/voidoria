@@ -25,20 +25,19 @@ router.get("/stats", requireAuth, async (req, res) => {
       include: { item: true },
     });
 
+    const ALL_RARITIES = ["COMMON", "RARE", "EPIC", "LEGENDARY", "MYTHIC", "SECRET", "TRANSCENDENTAL", "OMNIVERSAL"];
+
     const stats = {
       totalItems: items.reduce((sum, i) => sum + i.quantity, 0),
       uniqueItems: items.length,
       totalValue: items.reduce((sum, i) => sum + i.item.basePrice * i.quantity, 0),
-      byRarity: {
-        COMMON: 0,
-        RARE: 0,
-        EPIC: 0,
-        LEGENDARY: 0,
-      },
+      byRarity: Object.fromEntries(ALL_RARITIES.map((r) => [r, 0])),
     };
 
     for (const inv of items) {
-      stats.byRarity[inv.item.rarity] += inv.quantity;
+      if (stats.byRarity[inv.item.rarity] !== undefined) {
+        stats.byRarity[inv.item.rarity] += inv.quantity;
+      }
     }
 
     res.json({ stats });

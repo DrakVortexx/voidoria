@@ -21,10 +21,15 @@ router.get("/", async (req, res) => {
 
 router.post("/buy", requireAuth, async (req, res) => {
   try {
-    const { listingId, quantity = 1 } = req.body;
+    const { listingId } = req.body;
+    const quantity = Number(req.body.quantity ?? 1);
 
-    if (!listingId || quantity < 1 || quantity > 99) {
+    if (!listingId || !Number.isInteger(quantity) || quantity < 1 || quantity > 99) {
       return res.status(400).json({ error: "Invalid listing or quantity (1-99)" });
+    }
+
+    if (typeof listingId !== "string" || listingId.length > 64) {
+      return res.status(400).json({ error: "Invalid listing" });
     }
 
     const listing = await prisma.shopListing.findUnique({
@@ -49,17 +54,16 @@ router.post("/buy", requireAuth, async (req, res) => {
     const xpGained = quantity * 5;
 
     const result = await prisma.$transaction(async (tx) => {
-      const levelResult = calculateLevelUp(req.player.level, req.player.xp, xpGained);
+        const levelResult = calculateLevelUp(req.player.level, req.player.xp, xpGained);
 
-      await tx.player.update({
-        where: { id: req.player.id },
-        data: {
-          coins: { decrement: totalCost },
-          level: levelResult.level,
-          xp: levelResult.xp,
-          ...(levelResult.coinBonus > 0 ? { coins: { increment: levelResult.coinBonus } } : {}),
-        },
-      });
+        await tx.player.update({
+          where: { id: req.player.id },
+          data: {
+            coins: { increment: levelResult.coinBonus - totalCost },
+            level: levelResult.level,
+            xp: levelResult.xp,
+          },
+        });
 
       if (listing.stock !== -1) {
         await tx.shopListing.update({
@@ -104,10 +108,15 @@ router.post("/buy", requireAuth, async (req, res) => {
 
 router.post("/sell", requireAuth, async (req, res) => {
   try {
-    const { inventoryId, quantity = 1 } = req.body;
+    const { inventoryId } = req.body;
+    const quantity = Number(req.body.quantity ?? 1);
 
-    if (!inventoryId || quantity < 1) {
-      return res.status(400).json({ error: "Invalid inventory item or quantity" });
+    if (!inventoryId || !Number.isInteger(quantity) || quantity < 1 || quantity > 999) {
+      return res.status(400).json({ error: "Invalid inventory item or quantity (1-999)" });
+    }
+
+    if (typeof inventoryId !== "string" || inventoryId.length > 64) {
+      return res.status(400).json({ error: "Invalid inventory item" });
     }
 
     const inventoryItem = await prisma.inventory.findUnique({

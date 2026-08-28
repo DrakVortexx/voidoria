@@ -3,10 +3,17 @@ const bcrypt = require("bcrypt");
 const { v4: uuidv4 } = require("uuid");
 const prisma = require("../db");
 const { validateBody, isValidUsername, isValidPassword } = require("../middleware/validate");
+const { ADMIN_USERNAME, COOKIE_NAME, SESSION_DURATION_MS } = require("../config");
 
 const router = express.Router();
 
-const SESSION_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
+function publicUser(user) {
+  return {
+    id: user.id,
+    username: user.username,
+    isAdmin: user.username === ADMIN_USERNAME,
+  };
+}
 
 router.post("/register", validateBody(["username", "password", "confirmPassword"]), async (req, res) => {
   try {
@@ -51,7 +58,7 @@ router.post("/register", validateBody(["username", "password", "confirmPassword"
       },
     });
 
-    res.cookie("session_token", token, {
+    res.cookie(COOKIE_NAME, token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "strict",
@@ -60,10 +67,7 @@ router.post("/register", validateBody(["username", "password", "confirmPassword"
     });
 
     res.status(201).json({
-      user: {
-        id: user.id,
-        username: user.username,
-      },
+      user: publicUser(user),
       player: user.player,
     });
   } catch (err) {
@@ -99,7 +103,7 @@ router.post("/login", validateBody(["login", "password"]), async (req, res) => {
       },
     });
 
-    res.cookie("session_token", token, {
+    res.cookie(COOKIE_NAME, token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "strict",
@@ -108,10 +112,7 @@ router.post("/login", validateBody(["login", "password"]), async (req, res) => {
     });
 
     res.json({
-      user: {
-        id: user.id,
-        username: user.username,
-      },
+      user: publicUser(user),
       player: user.player,
     });
   } catch (err) {
@@ -122,11 +123,11 @@ router.post("/login", validateBody(["login", "password"]), async (req, res) => {
 
 router.post("/logout", async (req, res) => {
   try {
-    const token = req.cookies?.session_token;
+    const token = req.cookies?.[COOKIE_NAME];
     if (token) {
       await prisma.session.deleteMany({ where: { token } });
     }
-    res.clearCookie("session_token", { path: "/" });
+    res.clearCookie(COOKIE_NAME, { path: "/" });
     res.json({ message: "Logged out" });
   } catch (err) {
     console.error("Logout error:", err);
@@ -136,7 +137,7 @@ router.post("/logout", async (req, res) => {
 
 router.get("/me", async (req, res) => {
   try {
-    const token = req.cookies?.session_token;
+    const token = req.cookies?.[COOKIE_NAME];
     if (!token) {
       return res.status(401).json({ error: "Not authenticated" });
     }
@@ -154,10 +155,7 @@ router.get("/me", async (req, res) => {
     }
 
     res.json({
-      user: {
-        id: session.user.id,
-        username: session.user.username,
-      },
+      user: publicUser(session.user),
       player: session.user.player,
     });
   } catch (err) {

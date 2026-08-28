@@ -41,6 +41,8 @@ model Player {
   lastDailyReward  DateTime?     @map("last_daily_reward")
   activeJob        String?       @map("active_job")
   jobStartedAt     DateTime?     @map("job_started_at")
+  jobEarnedToday   Int           @default(0) @map("job_earned_today")
+  jobDayReset      DateTime?     @map("job_day_reset")
   createdAt        DateTime      @default(now()) @map("created_at")
   user             User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   inventory        Inventory[]
@@ -176,4 +178,5 @@ enum AuctionStatus {
   ACTIVE
   SOLD
   CANCELLED
+  EXPIRED
 }
