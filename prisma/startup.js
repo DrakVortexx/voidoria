@@ -88,7 +88,7 @@ async function ensureAdmin() {
   const password = useEnv ? envPass : crypto.randomBytes(24).toString("base64url");
   const hash = await bcrypt.hash(password, 12);
 
-  const user = await prisma.user.create({ data: { username: ADMIN_USERNAME, passwordHash } });
+  const user = await prisma.user.create({ data: { username: ADMIN_USERNAME, passwordHash: hash } });
   await createInitialState(user.id, user.username);
 
   if (!useEnv) {
