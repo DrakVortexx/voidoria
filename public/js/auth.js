@@ -41,7 +41,8 @@
       if (data.isNew || (data.player && !data.player.appearance)) {
         window.VOIDORIA.goCustomize(data.user);
       } else {
-        window.VOIDORIA.enterGame(data.user);
+        // Existing players land on their dashboard before entering the game
+        window.VOIDORIA.showDashboard(data.user);
       }
     } catch (err) {
       setMsg(loginMsg, err.message);

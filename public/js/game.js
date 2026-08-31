@@ -7,6 +7,7 @@ import { io } from "../vendor/socket.io.esm.min.js";
   const UI = {
     authScreen: $("#auth-screen"),
     customizeScreen: $("#customize-screen"),
+    dashboardScreen: $("#dashboard-screen"),
     game: $("#game"),
     connecting: $("#connecting"),
     menuOverlay: $("#menu-overlay"),
@@ -46,9 +47,22 @@ import { io } from "../vendor/socket.io.esm.min.js";
       window.Customize.show();
     },
 
-    async enterGame(user) {
+    async showDashboard(user) {
+      state.user = user;
       UI.authScreen.style.display = "none";
       UI.customizeScreen.style.display = "none";
+      UI.game.style.display = "none";
+      UI.menuOverlay.style.display = "none";
+      await loadProfile();
+      renderDashboard();
+      UI.dashboardScreen.style.display = "flex";
+    },
+
+    async enterGame(user) {
+      state.user = user;
+      UI.authScreen.style.display = "none";
+      UI.customizeScreen.style.display = "none";
+      UI.dashboardScreen.style.display = "none";
       UI.game.style.display = "block";
       UI.connecting.style.display = "flex";
       await loadProfile();
@@ -79,7 +93,7 @@ import { io } from "../vendor/socket.io.esm.min.js";
         VOIDORIA.goCustomize(data.user);
         return;
       }
-      VOIDORIA.enterGame(data.user);
+      VOIDORIA.showDashboard(data.user);
     } catch (e) {
       showAuth();
     }
@@ -89,6 +103,7 @@ import { io } from "../vendor/socket.io.esm.min.js";
     UI.authScreen.style.display = "flex";
     UI.game.style.display = "none";
     UI.customizeScreen.style.display = "none";
+    UI.dashboardScreen.style.display = "none";
   }
 
   // ---------- Profile load ----------
@@ -97,6 +112,26 @@ import { io } from "../vendor/socket.io.esm.min.js";
     state.profile = p.profile;
     state.settings = p.settings;
     state.levelXpNeed = p.profile.level * 100;
+  }
+
+  function renderDashboard() {
+    const p = state.profile;
+    if (!p) return;
+    $("#dash-name").textContent = p.displayName;
+    let coins = p.coins;
+    API.economy.bal().then((r) => {
+      coins = r.balance;
+      drawDashStats();
+    }).catch(() => drawDashStats());
+    function drawDashStats() {
+      $("#dash-stats").innerHTML = `
+        <div class="dash-stat"><div class="k">Balance</div><div class="v money">$${(coins || 0).toLocaleString()}</div></div>
+        <div class="dash-stat"><div class="k">Level</div><div class="v lvl">${p.level || 1}</div></div>
+        <div class="dash-stat"><div class="k">Kills</div><div class="v">${p.kills || 0}</div></div>
+        <div class="dash-stat"><div class="k">Deaths</div><div class="v">${p.deaths || 0}</div></div>
+        <div class="dash-stat span2"><div class="k">Dimension</div><div class="v">${escapeHtml(p.dimension || "overworld")}</div></div>
+      `;
+    }
   }
 
   // ---------- Engine ----------
@@ -871,15 +906,7 @@ import { io } from "../vendor/socket.io.esm.min.js";
   // ---------- menu/logout buttons ----------
   $("#btn-menu").addEventListener("click", openMenu);
   $("#btn-close-menu").addEventListener("click", closeMenu);
-  $("#btn-logout").addEventListener("click", async () => {
-    state.socket && state.socket.disconnect();
-    state.engine && state.engine.dispose();
-    try { await API.auth.logout(); } catch (e) {}
-    state.profile = null; state.inventory = []; state.hotbar = [];
-    UI.game.style.display = "none";
-    UI.menuOverlay.style.display = "none";
-    showAuth();
-  });
+  $("#btn-logout").addEventListener("click", logout);
 
   $("#customize-play").addEventListener("click", async () => {
     const msg = $("#customize-msg");
@@ -888,14 +915,32 @@ import { io } from "../vendor/socket.io.esm.min.js";
       await API.player.appearance({ appearance });
       msg.textContent = "";
       msg.className = "form-msg";
-      // ensure a profile exists (should already)
+      // ensure a profile exists (should already), then land on the dashboard
       await API.player.me();
-      await VOIDORIA.enterGame(state.user);
+      await VOIDORIA.showDashboard(state.user);
     } catch (err) {
       msg.textContent = err.message;
       msg.className = "form-msg";
     }
   });
+
+  // ---------- dashboard buttons ----------
+  function logout() {
+    state.socket && state.socket.disconnect();
+    state.engine && state.engine.dispose();
+    try { API.auth.logout(); } catch (e) {}
+    state.profile = null; state.inventory = []; state.hotbar = [];
+    UI.game.style.display = "none";
+    UI.menuOverlay.style.display = "none";
+    UI.dashboardScreen.style.display = "none";
+    showAuth();
+  }
+  $("#dashboard-play").addEventListener("click", () => VOIDORIA.enterGame(state.user));
+  $("#dashboard-customize").addEventListener("click", () => {
+    UI.dashboardScreen.style.display = "none";
+    window.Customize.show();
+  });
+  $("#dashboard-logout").addEventListener("click", logout);
 
   // ---------- helpers ----------
   function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
