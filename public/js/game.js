@@ -452,6 +452,10 @@ import { io } from "../vendor/socket.io.esm.min.js";
   async function renderProfile() {
     const p = state.profile;
     const el = $("#panel-profile");
+    if (!p) {
+      el.innerHTML = `<h2>Player Profile</h2><p class="sub">Your identity in Voidoria</p><p class="muted">Profile not loaded yet. Try again in a moment.</p>`;
+      return;
+    }
     el.innerHTML = `
       <h2>Player Profile</h2>
       <p class="sub">Your identity in Voidoria</p>
