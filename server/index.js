@@ -65,7 +65,7 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: "Internal server error" });
 });
 
-async function main() {
+async function startupBackground() {
   // Ensure the Prisma client is generated against the current schema (self-healing).
   // This guards against a stale client when only `npm install` runs (e.g. Render).
   try {
@@ -77,7 +77,7 @@ async function main() {
   const autoPush = process.env.AUTO_PUSH_SCHEMA !== "false";
 
   // On first deploy with AUTO_PUSH_SCHEMA=true, sync the schema so tables exist
-  // and the startup seed can populate shop categories, listings, and admin.
+  // and the startup seed can populate shop catalog, transactions, and admin.
   if (autoPush) {
     try {
       console.log("Syncing database schema...");
@@ -89,7 +89,10 @@ async function main() {
   }
 
   await startup();
+  app.locals.ready = true;
+}
 
+function main() {
   const server = http.createServer(app);
   const { io, gs } = setupSockets(server, world);
   global.__gameServer = gs;
@@ -99,8 +102,17 @@ async function main() {
   // convenience export for teleport route usage checks
   io.on("connection", () => {});
 
+  // Bind immediately so the platform health check sees an open port while the
+  // schema sync + seed run in the background.
   server.listen(PORT, () => {
-    console.log(`Voidoria server running on port ${PORT}`);
+    console.log(`Voidoria server listening on port ${PORT}`);
+  });
+
+  // DB schema sync + shop/admin seed happen in the background so startup does
+  // not block port binding (avoids Render "Timed Out" during slow first boot).
+  startupBackground().catch((err) => {
+    console.error("Startup/sync failed:", err);
+    process.exitCode = 1;
   });
 
   // graceful shutdown: persist dirty chunks
