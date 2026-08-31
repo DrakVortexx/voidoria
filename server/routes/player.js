@@ -185,7 +185,7 @@ router.post("/bounties", async (req, res) => {
     const bal = await economy.getBalance(req.player.id);
     if (bal < BigInt(amount)) return res.status(400).json({ error: "Insufficient funds" });
 
-    await economy.paySystem(req.player.id, amount, "bounty", `Bounty on ${targetName}`);
+    await economy.paySystem(req.player.id, amount, "BOUNTY_PLACED", `Bounty on ${targetName}`);
 
     await prisma.bounty.create({
       data: {

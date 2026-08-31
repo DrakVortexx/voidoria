@@ -21,9 +21,9 @@
 - 10,000 × 10,000 block world (X/Z –5000 to +5000) with world border
 - 16×16 procedural **chunk** system with streaming, caching, and persistence
 - Server-authoritative block breaking/placing, inventory, movement, and money
-- Economy: `/bal`, `/pay`, `/baltop`, starting balance `$10,000`
-- Shop (admin-configurable categories/items/prices) and `/ah` Auction House
-- `/shop` `/sell` `/sellall` `/ah`
+- Economies: `/bal`, `/pay`, `/baltop`, starting balance `$10,000`
+- **Server Shop** (server-controlled prices in `shop_items`) and **Auction House** (player→player listings in `auction_listings`) are fully separate systems
+- `/shop` (buy/sell from the server) and `/ah` (player listings, search/sort/categories) with commands `/shop` `/sell` `/sellall` `/ah`
 - Teleportation: `/spawn`, `/rtp`, `/tpa`, `/tpahere`, `/tpaccept`, `/tpdeny`, `/home`, `/sethome`
 - Settings panel (TPA/TPAHere/PvP/chat/notifications) persisted per user
 - Bases: build anywhere; block changes persist
@@ -46,7 +46,7 @@ Express + Socket.IO (server/index.js)
    ▼
 WorldEngine (procedural generation + chunk cache + persistence)
    ▼
-Neon PostgreSQL (users, profiles, balances, chunks, listings, ...)
+Neon PostgreSQL (users, profiles, balances, chunks, shop_items, auction_listings, transactions, ...)
 ```
 
 **Persistence strategy (performance):**
@@ -55,6 +55,28 @@ Neon PostgreSQL (users, profiles, balances, chunks, listings, ...)
 - Block edits are stored as a compressed modification list, saved separately from procedural generation and applied on load.
 - DB writes are **batched/debounced**; Neon is the persistent store, not the live game loop.
 - Chunks are LRU-cached in memory (max 2048) and only view-distance chunks are streamed to players.
+
+---
+
+## Shop vs Auction House — Database Separation
+
+The **Server Shop** and the **Auction House** are two completely independent systems backed by separate tables.
+
+| Concept | Server Shop | Auction House |
+|---------|-------------|---------------|
+| Table | `shop_items` | `auction_listings` |
+| Owned by | Voidoria (the server) | Individual players |
+| Who sets prices | The server only | The seller (at list time) |
+| Players can | Buy / sell items | List / browse / buy / cancel listings |
+| Can players list? | No | Yes |
+| Can players edit prices? | No | Prices are fixed per listing |
+| Money movement | Player ⇄ system | Buyer → Seller (atomic) |
+
+Routes:
+- **Server Shop:** `GET /api/shop`, `POST /api/shop/buy`, `POST /api/shop/sell`, `POST /api/shop/sellall`
+- **Auction House:** `GET /api/ah`, `POST /api/ah/list`, `POST /api/ah/buy`, `POST /api/ah/cancel`
+
+History and money movement are recorded in `transactions` (types such as `SHOP_PURCHASE`, `SHOP_SALE`, `AUCTION_PURCHASE`, `PLAYER_PAYMENT`, `BOUNTY_REWARD`) and, for item-level Shop history, in `shop_transactions`.
 
 ---
 
@@ -122,7 +144,7 @@ npm start          # production-style start
 Then open **http://localhost:3000**
 
 The server:
-- Seeds the shop catalog, categories, and admin user on first run.
+- Seeds the server Shop catalog (`shop_items`) and the admin user on first run.
 - Serves the static client from `public/`.
 - Runs Socket.IO on the same HTTP server for real-time play.
 
@@ -165,8 +187,8 @@ Log in as the admin username. The admin panel exposes:
 - `GET /api/admin/players`
 - `POST /api/admin/give` (`{ username, amount }`)
 - `POST /api/admin/item` (`{ username, itemType, amount }`)
-- `GET/POST /api/admin/listings` (shop item/price/availability management)
-- `POST /api/admin/categories`
+- `GET/POST /api/admin/listings` (server Shop item/price/stock management in `shop_items`)
+- `GET /api/admin/categories` (distinct Shop categories)
 
 ---
 

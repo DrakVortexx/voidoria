@@ -62,7 +62,9 @@ model PlayerProfile {
   balances   Balance[]
   sentTransactions   Transaction[] @relation("TransSender")
   receivedTransactions Transaction[] @relation("TransReceiver")
-  auctions   AuctionListing[]
+  auctionsSeller   AuctionListing[] @relation("AuctionSeller")
+  auctionsBuyer    AuctionListing[] @relation("AuctionBuyer")
+  shopTransactions ShopTransaction[]
   homes      PlayerHome[]
   bountiesCreated Bounty[] @relation("BountyCreator")
   bountiesTargeted Bounty[] @relation("BountyTarget")
@@ -106,15 +108,15 @@ model Balance {
 }
 
 model Transaction {
-  id        String   @id @default(uuid())
-  senderId  String?  @map("sender_id")
-  receiverId String? @map("receiver_id")
-  amount    BigInt   @map("amount")
-  type      String   // "pay", "shop_buy", "shop_sell", "auction_buy", "auction_sell", "bounty", "rtp", "starting", "admin"
-  reference String?
-  createdAt DateTime @default(now()) @map("created_at")
-  sender    PlayerProfile? @relation("TransSender", fields: [senderId], references: [id], onDelete: SetNull)
-  receiver  PlayerProfile? @relation("TransReceiver", fields: [receiverId], references: [id], onDelete: SetNull)
+  id          String   @id @default(uuid())
+  senderId    String?  @map("sender_id")
+  receiverId  String?  @map("receiver_id")
+  amount      BigInt   @map("amount")
+  type        String   // SHOP_PURCHASE, SHOP_SALE, AUCTION_PURCHASE, PLAYER_PAYMENT, BOUNTY_REWARD, RTP, STARTING, ADMIN, PVP, REFUND
+  reference   String?  @map("reference_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  sender      PlayerProfile? @relation("TransSender", fields: [senderId], references: [id], onDelete: SetNull)
+  receiver    PlayerProfile? @relation("TransReceiver", fields: [receiverId], references: [id], onDelete: SetNull)
 
   @@index([senderId])
   @@index([receiverId])
@@ -124,15 +126,17 @@ model Transaction {
 model AuctionListing {
   id        String   @id @default(uuid())
   sellerId  String   @map("seller_id")
-  itemType  String   @map("item_type")
+  itemType  String   @map("item_id")
   quantity  Int      @default(1)
   price     BigInt   @map("price")
   status    String   @default("ACTIVE") // ACTIVE, SOLD, CANCELLED, EXPIRED
   createdAt DateTime @default(now()) @map("created_at")
   expiresAt DateTime @map("expires_at")
   soldAt    DateTime? @map("sold_at")
+  buyerId   String?  @map("buyer_id")
   metadata  Json     @default("{}")
-  seller    PlayerProfile @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  seller    PlayerProfile @relation("AuctionSeller", fields: [sellerId], references: [id], onDelete: Cascade)
+  buyer     PlayerProfile? @relation("AuctionBuyer", fields: [buyerId], references: [id], onDelete: SetNull)
 
   @@index([sellerId])
   @@index([status])
@@ -219,25 +223,36 @@ model WorldChunk {
   @@map("world_chunks")
 }
 
-model ShopCategory {
-  id   String @id
-  name String @unique
-  listings ShopListing[]
+model ShopItem {
+  id          String   @id
+  itemId      String   @unique @map("item_id")
+  displayName String   @map("display_name")
+  category    String   @default("misc")
+  buyPrice    BigInt   @map("buy_price")   // -1 = not buyable
+  sellPrice   BigInt   @map("sell_price")  // -1 = not sellable
+  enabled     Boolean  @default(true)
+  stock       Int?     @map("stock")       // null = unlimited
+  metadata    Json     @default("{}")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
 
-  @@map("shop_categories")
+  @@index([category])
+  @@map("shop_items")
 }
 
-model ShopListing {
+model ShopTransaction {
   id         String   @id @default(uuid())
-  itemType   String   @map("item_type")
-  buyPrice   BigInt   @map("buy_price")  // -1 means not buyable
-  sellPrice  BigInt   @map("sell_price") // -1 means not sellable
-  available  Boolean  @default(true)
-  categoryId String   @map("category_id")
-  category   ShopCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  playerId   String   @map("player_id")
+  itemId     String   @map("item_id")
+  quantity   Int      @map("quantity")
+  unitPrice  BigInt   @map("unit_price")
+  totalPrice BigInt   @map("total_price")
+  type       String   // BUY or SELL
+  createdAt  DateTime @default(now()) @map("created_at")
+  profile    PlayerProfile @relation(fields: [playerId], references: [id], onDelete: Cascade)
 
-  @@index([categoryId])
-  @@map("shop_listings")
+  @@index([playerId])
+  @@map("shop_transactions")
 }
 
 model PendingTeleport {

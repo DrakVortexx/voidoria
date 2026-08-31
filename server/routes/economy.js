@@ -22,7 +22,7 @@ router.post("/pay", validateBody(["username", "amount"]), async (req, res) => {
     const amount = toInt(req.body.amount);
     if (!isPosInt(amount)) return res.status(400).json({ error: "Valid amount required" });
 
-    const result = await economy.transfer(req.player.id, target.profile.id, amount, "pay", `Payment to ${req.body.username}`);
+    const result = await economy.transfer(req.player.id, target.profile.id, amount, "PLAYER_PAYMENT", `Payment to ${req.body.username}`);
     res.json({ message: `Paid $${amount} to ${req.body.username}`, yourBalance: result.sender });
   } catch (err) {
     res.status(400).json({ error: err.message || "Payment failed" });

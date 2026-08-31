@@ -1,11 +1,12 @@
 const { PrismaClient } = require("@prisma/client");
-const { seedShop, ensureAdmin } = require("./startup");
+const { seedShopItems, ensureAdmin } = require("./startup");
 
 const prisma = new PrismaClient();
 
 async function seed() {
   console.log("Resetting database...");
 
+  await prisma.shopTransaction.deleteMany();
   await prisma.cooldown.deleteMany();
   await prisma.stasisChamber.deleteMany();
   await prisma.pendingTeleport.deleteMany();
@@ -19,11 +20,10 @@ async function seed() {
   await prisma.playerProfile.deleteMany();
   await prisma.session.deleteMany();
   await prisma.user.deleteMany();
-  await prisma.shopListing.deleteMany();
-  await prisma.shopCategory.deleteMany();
+  await prisma.shopItem.deleteMany();
   await prisma.worldChunk.deleteMany();
 
-  await seedShop();
+  await seedShopItems();
   await ensureAdmin();
 
   console.log("Database seeding complete!");

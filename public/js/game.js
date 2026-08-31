@@ -540,17 +540,17 @@ import { io } from "../vendor/socket.io.esm.min.js";
 
   async function renderShop() {
     const el = $("#panel-shop");
-    el.innerHTML = `<h2>Voidoria Shop</h2><p class="sub">Server-authoritative trade. Buy and sell with your balance.</p><div id="shop-body">Loading...</div>`;
+    el.innerHTML = `<h2>Voidoria Shop</h2><p class="sub">Prices are set by Voidoria and apply to everyone. Buy items from, or sell items to, the Shop.</p><div id="shop-body">Loading...</div>`;
     try {
       const data = await API.shop.all();
       let html = `<div class="toolbar"><select id="shop-cat"><option value="">All Categories</option>${data.categories.map((c) => `<option value="${c.id}">${c.name}</option>`).join("")}</select></div>`;
       html += data.categories.map((cat) => `
         <div class="shop-cat" data-cat="${cat.id}">
-          <h3>${cat.name}</h3><div class="grid">
+          <h3>${escapeHtml(cat.name)}</h3><div class="grid">
           ${cat.items.map((it) => `
             <div class="card">
-              <h4>${icon(BLOCK_COLORS[it.itemType] || "#777")} ${escapeHtml(it.name)}</h4>
-              <div class="muted">${it.buyPrice >= 0 ? `Buy $${it.buyPrice.toLocaleString()}` : "Not for sale"} · ${it.sellPrice >= 0 ? `Sell $${it.sellPrice.toLocaleString()}` : "Not sellable"}</div>
+              <h4>${icon(BLOCK_COLORS[it.itemType] || "#777")} ${escapeHtml(it.displayName)}</h4>
+              <div class="muted">${it.buyPrice >= 0 ? `Buy $${it.buyPrice.toLocaleString()}` : "Not for sale"} · ${it.sellPrice >= 0 ? `Sell $${it.sellPrice.toLocaleString()}` : "Not sellable"}${it.stock != null ? ` · Stock: ${it.stock}` : ""}</div>
               <div class="btn-row">
                 ${it.buyPrice >= 0 ? `<button class="btn small primary" data-buy="${it.itemType}">Buy</button>` : ""}
                 ${it.sellPrice >= 0 ? `<button class="btn small ghost" data-sell="${it.itemType}">Sell</button>` : ""}
@@ -582,40 +582,80 @@ import { io } from "../vendor/socket.io.esm.min.js";
 
   async function renderAuction() {
     const el = $("#panel-auction");
-    el.innerHTML = `<h2>Auction House</h2><p class="sub">List items, browse, and buy from other players.</p>
+    el.innerHTML = `<h2>Auction House</h2><p class="sub">Player-to-player sales. List items, browse, and buy from other players.</p>
+      <div class="ah-list-form">
+        <h3>List an item</h3>
+        <div class="field">
+          <input id="ah-item" placeholder="Item ID (e.g. block:diamond)" value="${escapeHtml(state.auctionPrefill || "")}">
+          <input id="ah-qty" type="number" min="1" placeholder="Qty" style="width:70px">
+          <input id="ah-price" type="number" min="1" placeholder="Price $" style="width:110px">
+          <button class="btn primary" id="ah-list">List</button>
+        </div>
+      </div>
       <div class="toolbar">
         <input id="ah-search" placeholder="Search...">
-        <select id="ah-filter"><option value="">All</option><option value="cheap">Cheap</option><option value="mine">My listings</option></select>
+        <select id="ah-category"><option value="">All Categories</option></select>
+        <select id="ah-sort">
+          <option value="newest">Newest</option>
+          <option value="cheapest">Cheapest</option>
+          <option value="highest">Highest</option>
+        </select>
+        <label class="chk"><input type="checkbox" id="ah-mine"> My Listings</label>
         <button class="btn small primary" id="ah-refresh">Refresh</button>
       </div>
       <div id="ah-body">Loading...</div>`;
-    await loadAuction();
+    $("#ah-list").addEventListener("click", listAuctionItem);
     $("#ah-refresh").addEventListener("click", loadAuction);
     $("#ah-search").addEventListener("input", debounce(loadAuction, 300));
-    $("#ah-filter").addEventListener("change", loadAuction);
+    $("#ah-category").addEventListener("change", loadAuction);
+    $("#ah-sort").addEventListener("change", loadAuction);
+    $("#ah-mine").addEventListener("change", loadAuction);
+    try {
+      const cats = await API.auction.categories();
+      $("#ah-category").innerHTML = `<option value="">All Categories</option>` + cats.categories.map((c) => `<option value="${c}">${c}</option>`).join("");
+    } catch (_) {}
+    await loadAuction();
+  }
+
+  async function listAuctionItem() {
+    const itemType = $("#ah-item").value.trim();
+    const quantity = Number($("#ah-qty").value);
+    const price = Number($("#ah-price").value);
+    try {
+      const r = await API.auction.list({ itemType, quantity, price });
+      notice(r.message);
+      refreshInventory();
+      loadAuction();
+    } catch (err) { notice("", err.message, true); }
   }
 
   async function loadAuction() {
     const el = $("#ah-body");
     if (!el) return;
     const search = $("#ah-search") ? $("#ah-search").value : "";
-    const filter = $("#ah-filter") ? $("#ah-filter").value : "";
+    const category = $("#ah-category") ? $("#ah-category").value : "";
+    const sort = $("#ah-sort") ? $("#ah-sort").value : "newest";
+    const mine = $("#ah-mine") ? $("#ah-mine").checked : false;
     try {
       const q = new URLSearchParams();
       if (search) q.set("search", search);
-      if (filter) q.set("filter", filter);
+      if (category) q.set("category", category);
+      q.set("sort", sort);
+      if (mine) q.set("mine", "1");
       const data = await API.auction.all(q.toString() ? "?" + q.toString() : "");
       el.innerHTML = data.listings.length
         ? `<div class="list">${data.listings.map((l) => `
             <div class="list-item">
               <div class="grow">
                 <strong>${escapeHtml(l.name)}</strong> x${l.quantity}
-                <div class="muted">Seller: ${escapeHtml(l.seller)}</div>
+                <div class="muted">${l.status === "ACTIVE" ? "Seller: " + escapeHtml(l.seller) : escapeHtml(l.status) + (l.buyer ? " · Bought by " + escapeHtml(l.buyer) : "")}</div>
               </div>
               <div class="price">$${l.price.toLocaleString()}</div>
-              ${l.mine
+              ${(mine && l.status === "ACTIVE")
                 ? `<button class="btn small ghost" data-cancel="${l.id}">Cancel</button>`
-                : `<button class="btn small primary" data-buy="${l.id}">Buy</button>`}
+                : (!mine && l.status === "ACTIVE" && !l.mine
+                  ? `<button class="btn small primary" data-buy="${l.id}">Buy</button>`
+                  : "")}
             </div>`).join("")}</div>`
         : `<div class="muted">No listings found.</div>`;
       el.querySelectorAll("[data-buy]").forEach((b) => b.addEventListener("click", () => buyAuction(b.dataset.buy)));

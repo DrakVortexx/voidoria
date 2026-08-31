@@ -41,7 +41,7 @@ app.use("/api/auth", require("./routes/auth"));
 app.use("/api/player", require("./routes/player"));
 app.use("/api/economy", require("./routes/economy"));
 app.use("/api/shop", require("./routes/shop"));
-app.use("/api/auction", require("./routes/auction"));
+app.use("/api/ah", require("./routes/auction"));
 app.use("/api/teleport", require("./routes/teleport"));
 app.use("/api/stasis", require("./routes/stasis"));
 app.use("/api/world", require("./routes/world"));

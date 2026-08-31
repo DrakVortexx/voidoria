@@ -1,32 +1,36 @@
 const crypto = require("crypto");
 const bcrypt = require("bcrypt");
 const { PrismaClient } = require("@prisma/client");
-const { CATEGORIES, DEFAULT_LISTINGS, listingIdKey } = require("../server/world/catalogSeed");
+const { SHOP_ITEMS, shopItemKey } = require("../server/world/catalogSeed");
 const { ADMIN_USERNAME } = require("../server/config");
 
 const prisma = new PrismaClient();
 
 async function startup() {
-  await seedShop();
+  await seedShopItems();
   await ensureAdmin();
   await expireAuctionItems();
   console.log("Voidoria startup complete.");
 }
 
-async function seedShop() {
-  for (const c of CATEGORIES) {
-    await prisma.shopCategory.upsert({
-      where: { id: c.id },
-      update: { name: c.name },
-      create: { id: c.id, name: c.name },
-    });
-  }
-  for (const [itemType, buy, sell, cat, available] of DEFAULT_LISTINGS) {
-    const id = listingIdKey(itemType);
-    await prisma.shopListing.upsert({
+// Seeding the server-owned Shop catalog. This is authoritative data managed by
+// Voidoria, not player listings, so it is always regenerated/idempotent.
+async function seedShopItems() {
+  for (const [itemId, displayName, category, buy, sell, enabled, stock] of SHOP_ITEMS) {
+    const id = shopItemKey(itemId);
+    const data = {
+      itemId,
+      displayName,
+      category,
+      buyPrice: BigInt(buy),
+      sellPrice: BigInt(sell),
+      enabled,
+      stock: stock == null ? null : stock,
+    };
+    await prisma.shopItem.upsert({
       where: { id },
-      update: { buyPrice: BigInt(buy), sellPrice: BigInt(sell), available, categoryId: cat },
-      create: { id, itemType, buyPrice: BigInt(buy), sellPrice: BigInt(sell), available, categoryId: cat },
+      update: data,
+      create: { id, ...data },
     });
   }
 }
@@ -105,7 +109,7 @@ function defaultAppearance() {
 }
 
 async function seedCatalogAndShop() {
-  await seedShop();
+  await seedShopItems();
 }
 
-module.exports = { startup, seedShop, ensureAdmin, createInitialState, seedCatalogAndShop };
+module.exports = { startup, seedShopItems, ensureAdmin, createInitialState, seedCatalogAndShop };

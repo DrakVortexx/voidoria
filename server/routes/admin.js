@@ -5,7 +5,7 @@ const { sanitizeString, toInt, isPosInt, isNonNegInt } = require("../middleware/
 const economy = require("../services/economy");
 const inventory = require("../services/inventory");
 const { getItem } = require("../world/items");
-const { listingIdKey } = require("../world/catalogSeed");
+const { shopItemKey } = require("../world/catalogSeed");
 const { ADMIN_USERNAME } = require("../config");
 
 const router = express.Router();
@@ -17,47 +17,51 @@ router.use((req, res, next) => {
   next();
 });
 
+// ---- Server Shop management (shop_items) ----
+
 router.get("/listings", async (req, res) => {
-  const listings = await prisma.shopListing.findMany({ include: { category: true } });
+  const items = await prisma.shopItem.findMany({ orderBy: [{ category: "asc" }, { displayName: "asc" }] });
   res.json({
-    listings: listings.map((l) => ({
-      id: l.id, itemType: l.itemType, name: getItem(l.itemType)?.name || l.itemType,
-      buyPrice: Number(l.buyPrice), sellPrice: Number(l.sellPrice), available: l.available, category: l.category.name,
+    listings: items.map((l) => ({
+      id: l.id, itemId: l.itemId, itemType: l.itemId, name: l.displayName,
+      displayName: l.displayName, category: l.category,
+      buyPrice: Number(l.buyPrice), sellPrice: Number(l.sellPrice),
+      enabled: l.enabled, stock: l.stock,
     })),
   });
 });
 
 router.post("/listings", async (req, res) => {
   try {
-    const itemType = String(req.body.itemType || "");
-    if (!getItem(itemType)) return res.status(400).json({ error: "Unknown item type" });
+    const itemId = String(req.body.itemId || req.body.itemType || "");
+    if (!getItem(itemId)) return res.status(400).json({ error: "Unknown item type" });
+    const displayName = String(req.body.displayName || req.body.name || getItem(itemId)?.name || itemId);
     const buyPrice = toInt(req.body.buyPrice);
     const sellPrice = toInt(req.body.sellPrice);
-    const categoryId = String(req.body.categoryId || "misc");
-    const available = req.body.available !== false;
+    const category = sanitizeString(String(req.body.category || "Miscellaneous"), 40) || "Miscellaneous";
+    const enabled = req.body.enabled !== false;
+    const stock = req.body.stock === undefined || req.body.stock === null || req.body.stock === "" ? null : toInt(req.body.stock);
 
-    const id = listingIdKey(itemType);
-    await prisma.shopListing.upsert({
+    const id = shopItemKey(itemId);
+    await prisma.shopItem.upsert({
       where: { id },
-      update: { buyPrice: BigInt(buyPrice), sellPrice: BigInt(sellPrice), available, categoryId },
-      create: { id, itemType, buyPrice: BigInt(buyPrice), sellPrice: BigInt(sellPrice), available, categoryId },
+      update: { displayName, category, buyPrice: BigInt(buyPrice), sellPrice: BigInt(sellPrice), enabled, stock },
+      create: { id, itemId, displayName, category, buyPrice: BigInt(buyPrice), sellPrice: BigInt(sellPrice), enabled, stock },
     });
-    res.json({ message: `Listing for ${itemType} updated` });
+    res.json({ message: `Shop item ${itemId} updated` });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-router.post("/categories", async (req, res) => {
-  const id = String(req.body.id || "").toLowerCase().replace(/[^a-z0-9]/g, "");
-  const name = sanitizeString(String(req.body.name || ""), 40);
-  if (!id || !name) return res.status(400).json({ error: "id and name required" });
-  await prisma.shopCategory.upsert({
-    where: { id },
-    update: { name },
-    create: { id, name },
+// Distinct shop categories (now stored as strings on shop_items).
+router.get("/categories", async (req, res) => {
+  const rows = await prisma.shopItem.findMany({
+    select: { category: true },
+    distinct: ["category"],
+    orderBy: { category: "asc" },
   });
-  res.json({ message: `Category '${name}' saved` });
+  res.json({ categories: rows.map((r) => r.category) });
 });
 
 router.get("/players", async (req, res) => {
@@ -81,7 +85,7 @@ router.post("/give", async (req, res) => {
   if (!isPosInt(amount)) return res.status(400).json({ error: "Valid amount required" });
   const target = await prisma.user.findUnique({ where: { username }, include: { profile: true } });
   if (!target || !target.profile) return res.status(404).json({ error: "Player not found" });
-  await economy.creditSystem(target.profile.id, amount, "admin", `Admin grant to ${username}`);
+  await economy.creditSystem(target.profile.id, amount, "ADMIN", `Admin grant to ${username}`);
   res.json({ message: `Gave $${amount} to ${username}` });
 });
 

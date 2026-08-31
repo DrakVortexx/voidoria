@@ -57,10 +57,11 @@ const API = {
   },
 
   auction: {
-    all: (query = "") => API.json(`/api/auction${query}`),
-    list: (body) => API.json("/api/auction/list", { method: "POST", body }),
-    buy: (body) => API.json("/api/auction/buy", { method: "POST", body }),
-    cancel: (body) => API.json("/api/auction/cancel", { method: "POST", body }),
+    all: (query = "") => API.json(`/api/ah${query}`),
+    categories: () => API.json("/api/ah/categories"),
+    list: (body) => API.json("/api/ah/list", { method: "POST", body }),
+    buy: (body) => API.json("/api/ah/buy", { method: "POST", body }),
+    cancel: (body) => API.json("/api/ah/cancel", { method: "POST", body }),
   },
 
   teleport: {

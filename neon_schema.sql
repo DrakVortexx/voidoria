@@ -112,7 +112,7 @@ CREATE TABLE "transactions" (
   receiver_id TEXT REFERENCES "player_profiles"(id) ON DELETE SET NULL,
   amount      BIGINT NOT NULL,
   type        TEXT NOT NULL,
-  reference   TEXT,
+  reference_id TEXT,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT transactions_amount_check CHECK (amount > 0)
 );
@@ -126,19 +126,21 @@ DROP TABLE IF EXISTS "auction_listings" CASCADE;
 CREATE TABLE "auction_listings" (
   id         TEXT PRIMARY KEY,
   seller_id  TEXT NOT NULL REFERENCES "player_profiles"(id) ON DELETE CASCADE,
-  item_type  TEXT NOT NULL,
+  item_id    TEXT NOT NULL,
   quantity   INTEGER NOT NULL DEFAULT 1,
   price      BIGINT NOT NULL,
   status     TEXT NOT NULL DEFAULT 'ACTIVE',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   expires_at TIMESTAMPTZ NOT NULL,
   sold_at    TIMESTAMPTZ,
+  buyer_id   TEXT REFERENCES "player_profiles"(id) ON DELETE SET NULL,
   metadata   JSONB NOT NULL DEFAULT '{}'::jsonb,
   CONSTRAINT auction_status_check CHECK (status IN ('ACTIVE','SOLD','CANCELLED','EXPIRED')),
   CONSTRAINT auction_quantity_check CHECK (quantity > 0),
   CONSTRAINT auction_price_check CHECK (price > 0)
 );
 CREATE INDEX IF NOT EXISTS auction_seller_idx ON "auction_listings"(seller_id);
+CREATE INDEX IF NOT EXISTS auction_buyer_idx ON "auction_listings"(buyer_id);
 CREATE INDEX IF NOT EXISTS auction_status_idx ON "auction_listings"(status);
 CREATE INDEX IF NOT EXISTS auction_expires_idx ON "auction_listings"(expires_at);
 
@@ -229,27 +231,42 @@ CREATE TABLE "world_chunks" (
 CREATE INDEX IF NOT EXISTS world_chunks_dim_idx ON "world_chunks"(dimension, chunk_x, chunk_z);
 
 -- ----------------------------------------------------------------------------
--- shop_categories
+-- shop_items  — Server-owned Shop catalog (prices controlled by Voidoria).
+-- Players can buy/sell through the Shop but CANNOT list items or set prices.
 -- ----------------------------------------------------------------------------
-DROP TABLE IF EXISTS "shop_categories" CASCADE;
-CREATE TABLE "shop_categories" (
-  id   TEXT PRIMARY KEY,
-  name TEXT NOT NULL UNIQUE
+DROP TABLE IF EXISTS "shop_items" CASCADE;
+CREATE TABLE "shop_items" (
+  id           TEXT PRIMARY KEY,
+  item_id      TEXT NOT NULL UNIQUE,
+  display_name TEXT NOT NULL,
+  category     TEXT NOT NULL DEFAULT 'misc',
+  buy_price    BIGINT NOT NULL DEFAULT -1,
+  sell_price   BIGINT NOT NULL DEFAULT -1,
+  enabled      BOOLEAN NOT NULL DEFAULT true,
+  stock        INTEGER,
+  metadata     JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE INDEX IF NOT EXISTS shop_items_category_idx ON "shop_items"(category);
 
 -- ----------------------------------------------------------------------------
--- shop_listings
+-- shop_transactions  — Shop purchase/sale history (server Shop only).
 -- ----------------------------------------------------------------------------
-DROP TABLE IF EXISTS "shop_listings" CASCADE;
-CREATE TABLE "shop_listings" (
+DROP TABLE IF EXISTS "shop_transactions" CASCADE;
+CREATE TABLE "shop_transactions" (
   id          TEXT PRIMARY KEY,
-  item_type   TEXT NOT NULL,
-  buy_price   BIGINT NOT NULL DEFAULT -1,
-  sell_price  BIGINT NOT NULL DEFAULT -1,
-  available   BOOLEAN NOT NULL DEFAULT true,
-  category_id TEXT NOT NULL REFERENCES "shop_categories"(id) ON DELETE CASCADE
+  player_id   TEXT NOT NULL REFERENCES "player_profiles"(id) ON DELETE CASCADE,
+  item_id     TEXT NOT NULL,
+  quantity    INTEGER NOT NULL DEFAULT 1,
+  unit_price  BIGINT NOT NULL,
+  total_price BIGINT NOT NULL,
+  type        TEXT NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT shop_tx_quantity_check CHECK (quantity > 0),
+  CONSTRAINT shop_tx_type_check CHECK (type IN ('BUY','SELL'))
 );
-CREATE INDEX IF NOT EXISTS shop_listings_cat_idx ON "shop_listings"(category_id);
+CREATE INDEX IF NOT EXISTS shop_transactions_player_idx ON "shop_transactions"(player_id);
 
 -- ----------------------------------------------------------------------------
 -- pending_teleports

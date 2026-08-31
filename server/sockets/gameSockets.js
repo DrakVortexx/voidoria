@@ -367,7 +367,7 @@ class GameServer {
 
       // killer reward (small)
       try {
-        await economy.creditSystem(killer.profile.id, 20, "pvp", "Kill reward");
+        await economy.creditSystem(killer.profile.id, 20, "PVP", "Kill reward");
       } catch (e) {}
       this._bumpXp(killer, 10);
     }
@@ -408,7 +408,7 @@ class GameServer {
           });
           if (lock.count === 0) return;
           await economy.credit(killer.profile.id, b.amount, { tx });
-          await economy.recordTransfer(null, killer.profile.id, b.amount, "bounty", `Bounty for ${victim.profile.displayName}`, { tx });
+          await economy.recordTransfer(null, killer.profile.id, b.amount, "BOUNTY_REWARD", `Bounty for ${victim.profile.displayName}`, { tx });
         });
         this.io.emit("bounty:claimed", {
           killer: killer.profile.displayName,
