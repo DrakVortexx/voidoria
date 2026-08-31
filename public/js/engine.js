@@ -336,13 +336,13 @@ import * as THREE from "../vendor/three.module.js";
         this._lastSend = now;
         if (this.socket && this.socket.connected) {
           this.socket.emit("move", { x: this.position.x, y: this.position.y, z: this.position.z, yaw: this.yaw, pitch: this.pitch, onGround: this.onGround });
+          // chunk streaming
+          this.streamChunks();
         }
-        // chunk streaming
-        this.streamChunks();
       }
 
       // void death check (server authoritative, but Y floor for respawn UX)
-      if (this.currentDimension === "void" && this.position.y < -10 && this.socket) {
+      if (this.currentDimension === "void" && this.position.y < -10 && this.socket && this.socket.connected) {
         this.socket.emit("use", { itemType: "item:void_totem" }); // signal hazard fallback
       }
     }
@@ -358,6 +358,7 @@ import * as THREE from "../vendor/three.module.js";
     }
 
     streamChunks() {
+      if (!this.socket || !this.socket.connected) return;
       const dist = 3.5;
       const px = Math.floor(this.position.x / CHUNK);
       const pz = Math.floor(this.position.z / CHUNK);

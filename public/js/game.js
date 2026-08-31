@@ -118,6 +118,7 @@ import { io } from "../vendor/socket.io.esm.min.js";
       const token = getCookie("session_token");
       const socket = io({ auth: { token } });
       state.socket = socket;
+      if (state.engine) state.engine.setSocket(socket);
 
       socket.on("connect", () => {
         state.connected = true;
