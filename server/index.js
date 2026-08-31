@@ -66,10 +66,19 @@ app.use((err, req, res, next) => {
 });
 
 async function main() {
-  const isProduction = process.env.NODE_ENV === "production";
+  // Ensure the Prisma client is generated against the current schema (self-healing).
+  // This guards against a stale client when only `npm install` runs (e.g. Render).
+  try {
+    execSync("npx prisma generate", { stdio: "ignore" });
+  } catch (err) {
+    console.error("Prisma generate failed (continuing):", err.message);
+  }
+
   const autoPush = process.env.AUTO_PUSH_SCHEMA !== "false";
 
-  if (!isProduction && autoPush) {
+  // On first deploy with AUTO_PUSH_SCHEMA=true, sync the schema so tables exist
+  // and the startup seed can populate shop categories, listings, and admin.
+  if (autoPush) {
     try {
       console.log("Syncing database schema...");
       execSync("npx prisma db push --skip-generate", { stdio: "inherit" });
