@@ -12,8 +12,14 @@ model User {
   username     String    @unique
   passwordHash String    @map("password_hash")
   createdAt    DateTime  @default(now()) @map("created_at")
+  lastLogin    DateTime? @map("last_login")
   sessions     Session[]
-  player       Player?
+  profile      PlayerProfile?
+  friends     Friendship[]       @relation("FriendA")
+  friendsOf    Friendship[]       @relation("FriendB")
+  settings     PlayerSetting?
+  stasisChambers StasisChamber[]
+  cooldowns    Cooldown[]
 
   @@map("users")
 }
@@ -31,152 +37,248 @@ model Session {
   @@map("sessions")
 }
 
-model Player {
-  id               String        @id @default(uuid())
-  userId           String        @unique @map("user_id")
-  coins            Int           @default(10000)
-  level            Int           @default(1)
-  xp               Int           @default(0)
-  dailyStreak      Int           @default(0) @map("daily_streak")
-  lastDailyReward  DateTime?     @map("last_daily_reward")
-  activeJob        String?       @map("active_job")
-  jobStartedAt     DateTime?     @map("job_started_at")
-  jobEarnedToday   Int           @default(0) @map("job_earned_today")
-  jobDayReset      DateTime?     @map("job_day_reset")
-  createdAt        DateTime      @default(now()) @map("created_at")
-  user             User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  inventory        Inventory[]
-  sentTrades       Trade[]       @relation("TradeSender")
-  receivedTrades   Trade[]       @relation("TradeReceiver")
-  auctionListings  AuctionListing[]
-
-  @@map("players")
-}
-
-model Item {
-  id          String          @id @default(uuid())
-  name        String          @unique
-  description String
-  rarity      Rarity          @default(COMMON)
-  basePrice   Int             @map("base_price")
-  imageUrl    String?         @map("image_url")
-  type        ItemType        @default(GENERAL)
-  createdAt   DateTime        @default(now()) @map("created_at")
-  inventory   Inventory[]
-  shopListings ShopListing[]
-  auctionListings AuctionListing[]
-  tradeItems  TradeItem[]
-
-  @@map("items")
-}
-
-enum Rarity {
-  COMMON
-  RARE
-  EPIC
-  LEGENDARY
-  MYTHIC
-  SECRET
-  TRANSCENDENTAL
-  OMNIVERSAL
-}
-
-enum ItemType {
-  GENERAL
-  WEAPON
-  ARMOR
-  PET
-  COSMETIC
-  RELIC
-}
-
-model Inventory {
+model PlayerProfile {
   id         String   @id @default(uuid())
-  playerId   String   @map("player_id")
-  itemId     String   @map("item_id")
-  quantity   Int      @default(1)
-  acquiredAt DateTime @default(now()) @map("acquired_at")
-  player     Player   @relation(fields: [playerId], references: [id], onDelete: Cascade)
-  item       Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  userId     String   @unique @map("user_id")
+  displayName String  @map("display_name")
+  appearance Json     @default("{}") // hair/face/clothing/colors/accessories
+  posX       Float    @default(8) @map("pos_x")
+  posY       Float    @default(70) @map("pos_y")
+  posZ       Float    @default(8) @map("pos_z")
+  rotationY  Float    @default(0) @map("rotation_y")
+  dimension  String   @default("overworld")
+  health     Float    @default(20) @map("health")
+  maxHealth  Float    @default(20) @map("max_health")
+  hunger     Float    @default(20) @map("hunger")
+  xp         Float    @default(0) @map("xp")
+  level      Int      @default(1)
+  kills      Int      @default(0)
+  deaths     Int      @default(0)
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+  lastSeenAt DateTime? @map("last_seen_at")
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  inventory  InventorySlot[]
+  balances   Balance[]
+  sentTransactions   Transaction[] @relation("TransSender")
+  receivedTransactions Transaction[] @relation("TransReceiver")
+  auctions   AuctionListing[]
+  homes      PlayerHome[]
+  bountiesCreated Bounty[] @relation("BountyCreator")
+  bountiesTargeted Bounty[] @relation("BountyTarget")
+  pendingSends    PendingTeleport[] @relation("TpSender")
+  pendingReceives PendingTeleport[] @relation("TpReceiver")
 
-  @@unique([playerId, itemId])
-  @@map("inventory")
+  @@map("player_profiles")
 }
 
-model ShopListing {
+model PlayerItem {
+  id        String   @id @default(uuid())
+  itemType  String   @map("item_type") // block or item id
+  durability Float   @default(0) @map("durability")
+  metadata  Json     @default("{}")
+
+  @@map("player_items")
+}
+
+model InventorySlot {
   id       String   @id @default(uuid())
-  itemId   String   @map("item_id")
-  price    Int
-  stock    Int      @default(-1)
-  active   Boolean  @default(true)
-  item     Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  playerId String   @map("player_id")
+  slot     Int
+  itemType String   @map("item_type")
+  amount   Int      @default(1)
+  durability Float  @default(0) @map("durability")
+  metadata Json     @default("{}")
+  player   PlayerProfile @relation(fields: [playerId], references: [id], onDelete: Cascade)
 
-  @@map("shop_listings")
+  @@unique([playerId, slot])
+  @@index([playerId])
+  @@map("inventory_slots")
 }
 
-model Trade {
-  id           String   @id @default(uuid())
-  senderId     String   @map("sender_id")
-  receiverId   String   @map("receiver_id")
-  offerCoins   Int      @default(0) @map("offer_coins")
-  requestCoins Int      @default(0) @map("request_coins")
-  status       TradeStatus @default(PENDING)
-  createdAt    DateTime @default(now()) @map("created_at")
-  resolvedAt   DateTime? @map("resolved_at")
-  sender       Player   @relation("TradeSender", fields: [senderId], references: [id], onDelete: Cascade)
-  receiver     Player   @relation("TradeReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
-  items        TradeItem[]
+model Balance {
+  id       String  @id @default(uuid())
+  playerId String  @unique @map("player_id")
+  amount   BigInt  @default(0)
+  player   PlayerProfile @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@map("balances")
+}
+
+model Transaction {
+  id        String   @id @default(uuid())
+  senderId  String?  @map("sender_id")
+  receiverId String? @map("receiver_id")
+  amount    BigInt   @map("amount")
+  type      String   // "pay", "shop_buy", "shop_sell", "auction_buy", "auction_sell", "bounty", "rtp", "starting", "admin"
+  reference String?
+  createdAt DateTime @default(now()) @map("created_at")
+  sender    PlayerProfile? @relation("TransSender", fields: [senderId], references: [id], onDelete: SetNull)
+  receiver  PlayerProfile? @relation("TransReceiver", fields: [receiverId], references: [id], onDelete: SetNull)
 
   @@index([senderId])
   @@index([receiverId])
-  @@map("trades")
-}
-
-model TradeItem {
-  id        String      @id @default(uuid())
-  tradeId   String      @map("trade_id")
-  itemId    String      @map("item_id")
-  quantity  Int         @default(1)
-  direction TradeDirection
-  trade     Trade       @relation(fields: [tradeId], references: [id], onDelete: Cascade)
-  item      Item        @relation(fields: [itemId], references: [id], onDelete: Cascade)
-
-  @@map("trade_items")
-}
-
-enum TradeStatus {
-  PENDING
-  ACCEPTED
-  DECLINED
-  CANCELLED
-}
-
-enum TradeDirection {
-  OFFER
-  REQUEST
+  @@map("transactions")
 }
 
 model AuctionListing {
   id        String   @id @default(uuid())
   sellerId  String   @map("seller_id")
-  itemId    String   @map("item_id")
+  itemType  String   @map("item_type")
   quantity  Int      @default(1)
-  price     Int
-  status    AuctionStatus @default(ACTIVE)
+  price     BigInt   @map("price")
+  status    String   @default("ACTIVE") // ACTIVE, SOLD, CANCELLED, EXPIRED
   createdAt DateTime @default(now()) @map("created_at")
   expiresAt DateTime @map("expires_at")
-  seller    Player   @relation(fields: [sellerId], references: [id], onDelete: Cascade)
-  item      Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  soldAt    DateTime? @map("sold_at")
+  metadata  Json     @default("{}")
+  seller    PlayerProfile @relation(fields: [sellerId], references: [id], onDelete: Cascade)
 
   @@index([sellerId])
-  @@index([itemId])
   @@index([status])
+  @@index([expiresAt])
   @@map("auction_listings")
 }
 
-enum AuctionStatus {
-  ACTIVE
-  SOLD
-  CANCELLED
-  EXPIRED
+model PlayerHome {
+  id        String   @id @default(uuid())
+  playerId  String   @map("player_id")
+  name      String   @default("home")
+  x         Float    @map("x")
+  y         Float    @map("y")
+  z         Float    @map("z")
+  dimension String   @default("overworld")
+  createdAt DateTime @default(now()) @map("created_at")
+  profile   PlayerProfile @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@unique([playerId, name])
+  @@map("player_homes")
+}
+
+model Bounty {
+  id        String   @id @default(uuid())
+  creatorId String   @map("creator_id")
+  targetId  String   @map("target_id")
+  amount    BigInt   @map("amount")
+  status    String   @default("ACTIVE") // ACTIVE, CLAIMED, CANCELLED, EXPIRED
+  createdAt DateTime @default(now()) @map("created_at")
+  expiresAt DateTime? @map("expires_at")
+  claimedBy String?  @map("claimed_by")
+  creator   PlayerProfile @relation("BountyCreator", fields: [creatorId], references: [id], onDelete: Cascade)
+  target    PlayerProfile @relation("BountyTarget", fields: [targetId], references: [id], onDelete: Cascade)
+
+  @@index([targetId])
+  @@index([status])
+  @@map("bounties")
+}
+
+model Friendship {
+  id        String   @id @default(uuid())
+  userAId   String   @map("user_a_id")
+  userBId   String   @map("user_b_id")
+  status    String   @default("PENDING") // PENDING, ACCEPTED
+  createdAt DateTime @default(now()) @map("created_at")
+  userA     User     @relation("FriendA", fields: [userAId], references: [id], onDelete: Cascade)
+  userB     User     @relation("FriendB", fields: [userBId], references: [id], onDelete: Cascade)
+
+  @@unique([userAId, userBId])
+  @@index([userAId])
+  @@index([userBId])
+  @@map("friendships")
+}
+
+model PlayerSetting {
+  id              String  @id @default(uuid())
+  userId          String  @unique @map("user_id")
+  allowTpa        Boolean @default(true) @map("allow_tpa")
+  allowTpaHere    Boolean @default(true) @map("allow_tpa_here")
+  autoAcceptTpa   Boolean @default(false) @map("auto_accept_tpa")
+  autoAcceptTpaHere Boolean @default(false) @map("auto_accept_tpa_here")
+  chatVisible     Boolean @default(true) @map("chat_visible")
+  chatNotifications Boolean @default(true) @map("chat_notifications")
+  allowPvp        Boolean @default(true) @map("allow_pvp")
+  showScoreboard  Boolean @default(true) @map("show_scoreboard")
+  notifications   Boolean @default(true)
+  user            User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("player_settings")
+}
+
+model WorldChunk {
+  dimension    String   @map("dimension")
+  cx           Int      @map("chunk_x")
+  cz           Int      @map("chunk_z")
+  worldVersion Int      @default(1) @map("world_version")
+  generated    Boolean  @default(false)
+  terrain      String   @default("") // compressed base terrain
+  modifications String  @default("") // compressed [idx, block] list
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@id([dimension, cx, cz])
+  @@index([dimension, cx, cz])
+  @@map("world_chunks")
+}
+
+model ShopCategory {
+  id   String @id
+  name String @unique
+  listings ShopListing[]
+
+  @@map("shop_categories")
+}
+
+model ShopListing {
+  id         String   @id @default(uuid())
+  itemType   String   @map("item_type")
+  buyPrice   BigInt   @map("buy_price")  // -1 means not buyable
+  sellPrice  BigInt   @map("sell_price") // -1 means not sellable
+  available  Boolean  @default(true)
+  categoryId String   @map("category_id")
+  category   ShopCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@index([categoryId])
+  @@map("shop_listings")
+}
+
+model PendingTeleport {
+  id          String   @id @default(uuid())
+  senderId    String   @map("sender_id")
+  receiverId  String   @map("receiver_id")
+  kind        String   // "tpa", "tpahere"
+  status      String   @default("PENDING")
+  createdAt   DateTime @default(now()) @map("created_at")
+  expiresAt   DateTime @map("expires_at")
+  sender      PlayerProfile @relation("TpSender", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver    PlayerProfile @relation("TpReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
+
+  @@index([receiverId])
+  @@index([status])
+  @@map("pending_teleports")
+}
+
+model StasisChamber {
+  id          String   @id @default(uuid())
+  ownerId     String   @map("owner_id")
+  name        String   @default("Chamber")
+  x           Float    @map("x")
+  y           Float    @map("y")
+  z           Float    @map("z")
+  dimension   String   @default("overworld")
+  active      Boolean  @default(true)
+  lastPullAt  DateTime? @map("last_pull_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  owner       User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@map("stasis_chambers")
+}
+
+model Cooldown {
+  id      String   @id @default(uuid())
+  userId  String   @map("user_id")
+  kind    String   // "rtp", "stasis_pull", "spawn"
+  endsAt  DateTime @map("ends_at")
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, kind])
+  @@map("cooldowns")
 }

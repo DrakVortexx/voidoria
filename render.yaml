@@ -1,16 +1,22 @@
 services:
   - type: web
-    name: vaultoria
+    name: voidoria
     runtime: node
     plan: free
-    buildCommand: npm install && npx prisma generate && npx prisma db push
+    buildCommand: npm install && npx prisma generate
     startCommand: npm start
     envVars:
       - key: DATABASE_URL
         sync: false
       - key: SESSION_SECRET
         generateValue: true
+      - key: WORLD_SEED
+        value: 20260831
       - key: NODE_ENV
         value: production
+      - key: ADMIN_USERNAME
+        value: admin
       - key: ADMIN_PASSWORD
         sync: false
+      - key: AUTO_PUSH_SCHEMA
+        value: "false"

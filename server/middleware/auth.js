@@ -10,7 +10,7 @@ async function requireAuth(req, res, next) {
 
     const session = await prisma.session.findUnique({
       where: { token },
-      include: { user: { include: { player: true } } },
+      include: { user: { include: { profile: true, settings: true } } },
     });
 
     if (!session) {
@@ -23,7 +23,8 @@ async function requireAuth(req, res, next) {
     }
 
     req.user = session.user;
-    req.player = session.user.player;
+    req.player = session.user.profile;
+    req.settings = session.user.settings;
     next();
   } catch (err) {
     console.error("Auth middleware error:", err);

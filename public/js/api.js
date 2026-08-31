@@ -1,131 +1,91 @@
 const API = {
-  async request(method, url, body = null) {
-    const opts = {
-      method,
-      headers: { "Content-Type": "application/json" },
-      credentials: "same-origin",
-    };
-    if (body) opts.body = JSON.stringify(body);
-
+  async json(url, options = {}) {
+    const opts = { ...options, headers: { ...(options.headers || {}) } };
+    if (opts.body && typeof opts.body !== "string") {
+      opts.headers["Content-Type"] = "application/json";
+      opts.body = JSON.stringify(opts.body);
+    }
     const res = await fetch(url, opts);
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Request failed");
+    let data = null;
+    try { data = await res.json(); } catch (_) { data = {}; }
+    if (!res.ok) {
+      const err = new Error(data.error || "Request failed");
+      err.status = res.status;
+      throw err;
+    }
     return data;
   },
 
-  register(username, password, confirmPassword) {
-    return this.request("POST", "/api/auth/register", { username, password, confirmPassword });
+  auth: {
+    register: (body) => API.json("/api/auth/register", { method: "POST", body }),
+    login: (body) => API.json("/api/auth/login", { method: "POST", body }),
+    logout: () => API.json("/api/auth/logout", { method: "POST" }),
+    me: () => API.json("/api/auth/me"),
+    changePassword: (body) => API.json("/api/auth/change-password", { method: "POST", body }),
   },
 
-  login(login, password) {
-    return this.request("POST", "/api/auth/login", { login, password });
+  player: {
+    me: () => API.json("/api/player/me"),
+    appearance: (body) => API.json("/api/player/appearance", { method: "PUT", body }),
+    displayName: (body) => API.json("/api/player/display-name", { method: "PUT", body }),
+    stats: () => API.json("/api/player/stats"),
+    leaderboard: () => API.json("/api/player/leaderboard"),
+    inventory: () => API.json("/api/player/inventory"),
+    settings: () => API.json("/api/player/settings"),
+    updateSettings: (body) => API.json("/api/player/settings", { method: "PUT", body }),
+    homes: () => API.json("/api/player/homes"),
+    sethome: (body) => API.json("/api/player/sethome", { method: "POST", body }),
+    delhome: (body) => API.json("/api/player/delhome", { method: "POST", body }),
+    bounties: () => API.json("/api/player/bounties"),
+    placeBounty: (body) => API.json("/api/player/bounties", { method: "POST", body }),
+    friends: () => API.json("/api/player/friends"),
+    friendRequest: (body) => API.json("/api/player/friends/request", { method: "POST", body }),
+    friendRespond: (body) => API.json("/api/player/friends/respond", { method: "POST", body }),
   },
 
-  logout() {
-    return this.request("POST", "/api/auth/logout");
+  economy: {
+    bal: () => API.json("/api/economy/bal"),
+    pay: (body) => API.json("/api/economy/pay", { method: "POST", body }),
+    baltop: () => API.json("/api/economy/baltop"),
   },
 
-  me() {
-    return this.request("GET", "/api/auth/me");
+  shop: {
+    all: () => API.json("/api/shop"),
+    buy: (body) => API.json("/api/shop/buy", { method: "POST", body }),
+    sell: (body) => API.json("/api/shop/sell", { method: "POST", body }),
+    sellall: (body) => API.json("/api/shop/sellall", { method: "POST", body }),
   },
 
-  getProfile() {
-    return this.request("GET", "/api/player/profile");
+  auction: {
+    all: (query = "") => API.json(`/api/auction${query}`),
+    list: (body) => API.json("/api/auction/list", { method: "POST", body }),
+    buy: (body) => API.json("/api/auction/buy", { method: "POST", body }),
+    cancel: (body) => API.json("/api/auction/cancel", { method: "POST", body }),
   },
 
-  getLeaderboard() {
-    return this.request("GET", "/api/player/leaderboard");
+  teleport: {
+    spawn: () => API.json("/api/teleport/spawn", { method: "POST" }),
+    rtp: () => API.json("/api/teleport/rtp", { method: "POST" }),
+    home: (body) => API.json("/api/teleport/home", { method: "POST", body }),
+    tpa: (body) => API.json("/api/teleport/tpa", { method: "POST", body }),
+    tpahere: (body) => API.json("/api/teleport/tpahere", { method: "POST", body }),
+    tpaccept: (body) => API.json("/api/teleport/tpaccept", { method: "POST", body }),
+    tpdeny: (body) => API.json("/api/teleport/tpdeny", { method: "POST", body }),
   },
 
-  claimDaily() {
-    return this.request("POST", "/api/player/daily-reward");
+  stasis: {
+    all: () => API.json("/api/stasis"),
+    place: (body) => API.json("/api/stasis/place", { method: "POST", body }),
+    toggle: (body) => API.json("/api/stasis/toggle", { method: "POST", body }),
+    pull: (body) => API.json("/api/stasis/pull", { method: "POST", body }),
+    remove: (id) => API.json(`/api/stasis/${id}`, { method: "DELETE" }),
   },
 
-  getShop() {
-    return this.request("GET", "/api/shop");
+  world: {
+    catalog: () => API.json("/api/world/catalog"),
+    travel: (body) => API.json("/api/world/travel", { method: "POST", body }),
+    craft: (body) => API.json("/api/world/craft", { method: "POST", body }),
   },
 
-  buyItem(listingId, quantity) {
-    return this.request("POST", "/api/shop/buy", { listingId, quantity });
-  },
-
-  sellItem(inventoryId, quantity) {
-    return this.request("POST", "/api/shop/sell", { inventoryId, quantity });
-  },
-
-  getInventory() {
-    return this.request("GET", "/api/inventory");
-  },
-
-  getInventoryStats() {
-    return this.request("GET", "/api/inventory/stats");
-  },
-
-  createTrade(data) {
-    return this.request("POST", "/api/trade/create", data);
-  },
-
-  getPendingTrades() {
-    return this.request("GET", "/api/trade/pending");
-  },
-
-  acceptTrade(tradeId) {
-    return this.request("POST", "/api/trade/" + tradeId + "/accept");
-  },
-
-  declineTrade(tradeId) {
-    return this.request("POST", "/api/trade/" + tradeId + "/decline");
-  },
-
-  cancelTrade(tradeId) {
-    return this.request("POST", "/api/trade/" + tradeId + "/cancel");
-  },
-
-  getAuctionListings() {
-    return this.request("GET", "/api/auction");
-  },
-
-  listAuction(data) {
-    return this.request("POST", "/api/auction/list", data);
-  },
-
-  buyAuction(listingId) {
-    return this.request("POST", "/api/auction/buy/" + listingId);
-  },
-
-  cancelAuction(listingId) {
-    return this.request("POST", "/api/auction/cancel/" + listingId);
-  },
-
-  getJobs() {
-    return this.request("GET", "/api/jobs");
-  },
-
-  startJob(jobId) {
-    return this.request("POST", "/api/jobs/start", { jobId: jobId });
-  },
-
-  stopJob() {
-    return this.request("POST", "/api/jobs/stop");
-  },
-
-  collectJob() {
-    return this.request("POST", "/api/jobs/collect");
-  },
-
-  adminPlayers() {
-    return this.request("GET", "/api/admin/players");
-  },
-
-  adminGiveCoins(username, amount) {
-    return this.request("POST", "/api/admin/give-coins", { username: username, amount: amount });
-  },
-
-  adminGiveItem(username, itemName, quantity) {
-    return this.request("POST", "/api/admin/give-item", { username: username, itemName: itemName, quantity: quantity });
-  },
-
-  adminSetLevel(username, level) {
-    return this.request("POST", "/api/admin/set-level", { username: username, level: level });
-  },
+  meta: () => API.json("/api/meta"),
 };

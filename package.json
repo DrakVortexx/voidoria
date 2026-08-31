@@ -1,11 +1,12 @@
 {
-  "name": "vaultoria",
+  "name": "voidoria",
   "version": "1.0.0",
-  "description": "Multiplayer economy and collectible game",
+  "description": "Voidoria - an original multiplayer voxel sandbox survival and economy game",
   "main": "server/index.js",
   "scripts": {
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
+    "game:test": "node tests/terrain.test.js",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:seed": "node prisma/seed.js",
@@ -24,6 +25,9 @@
     "express": "^4.21.1",
     "express-rate-limit": "^7.4.1",
     "helmet": "^8.0.0",
+    "simplex-noise": "^4.0.3",
+    "socket.io": "^4.8.3",
+    "socket.io-client": "^4.8.3",
     "uuid": "^11.1.1"
   },
   "devDependencies": {

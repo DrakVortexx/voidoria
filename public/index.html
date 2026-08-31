@@ -1,89 +1,247 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Vaultoria</title>
-  <link rel="stylesheet" href="/css/style.css">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Voidoria - an original multiplayer voxel sandbox survival and economy game. Build, explore, trade, and brave The Void." />
+  <meta name="theme-color" content="#0b0e1a" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' fill='%230b0e1a'/><path d='M20 70 L50 20 L80 70 Z' fill='%237b5cf6'/><circle cx='50' cy='60' r='9' fill='%23a78bfa'/><rect x='50' y='52' width='7' height='16' fill='%23e0e7ff'/></svg>" />
+  <title>Voidoria</title>
+  <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
-  <div id="toast-container"></div>
 
-  <div id="auth-screen" class="screen active">
-    <div class="auth-box">
-      <h1 class="site-title">Vaultoria</h1>
+  <!-- ============ AUTH SCREEN ============ -->
+  <div id="auth-screen" class="screen">
+    <div class="auth-bg"></div>
+    <div class="auth-card">
+      <div class="logo">
+        <div class="logo-mark">
+          <svg viewBox="0 0 100 100" width="72" height="72" aria-hidden="true">
+            <rect width="100" height="100" fill="transparent"/>
+            <defs><linearGradient id="vg" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#7b5cf6"/><stop offset="1" stop-color="#312e81"/>
+            </linearGradient></defs>
+            <path d="M20 72 L50 18 L80 72 Z" fill="url(#vg)"/>
+            <circle cx="50" cy="62" r="10" fill="#a78bfa"/>
+            <rect x="50" y="53" width="8" height="18" fill="#e0e7ff"/>
+          </svg>
+        </div>
+        <h1>VOIDORIA</h1>
+        <p class="tagline">SURVIVE&nbsp;&middot;&nbsp;BUILD&nbsp;&middot;&nbsp;BRAVE THE VOID</p>
+      </div>
 
-      <form id="login-form" class="auth-form">
-        <div class="field">
-          <label for="login-username">Username</label>
-          <input type="text" id="login-username" autocomplete="username" required>
-        </div>
-        <div class="field">
-          <label for="login-password">Password</label>
-          <input type="password" id="login-password" autocomplete="current-password" required>
-        </div>
-        <button type="submit" class="btn btn-primary btn-block">Log in</button>
+      <div class="tabs">
+        <button class="tab active" data-tab="login">Login</button>
+        <button class="tab" data-tab="register">Register</button>
+      </div>
+
+      <form id="login-form" class="form active">
+        <label>Username<input id="login-user" type="text" autocomplete="username" required /></label>
+        <label>Password<input id="login-pass" type="password" autocomplete="current-password" required /></label>
+        <button type="submit" class="btn primary">Enter Voidoria</button>
+        <p class="form-msg" id="login-msg"></p>
       </form>
 
-      <form id="register-form" class="auth-form hidden">
-        <div class="field">
-          <label for="reg-username">Username</label>
-          <input type="text" id="reg-username" autocomplete="username" minlength="3" maxlength="20" required>
-        </div>
-        <div class="field">
-          <label for="reg-password">Password</label>
-          <input type="password" id="reg-password" autocomplete="new-password" minlength="6" required>
-        </div>
-        <div class="field">
-          <label for="reg-confirm">Confirm password</label>
-          <input type="password" id="reg-confirm" autocomplete="new-password" minlength="6" required>
-        </div>
-        <button type="submit" class="btn btn-primary btn-block">Create account</button>
+      <form id="register-form" class="form">
+        <label>Username<input id="reg-user" type="text" autocomplete="username" minlength="3" maxlength="20" pattern="[A-Za-z0-9_]+" title="3-20 characters, letters/numbers/underscores" required /></label>
+        <label>Password<input id="reg-pass" type="password" autocomplete="new-password" minlength="6" required /></label>
+        <label>Confirm Password<input id="reg-pass2" type="password" autocomplete="new-password" required /></label>
+        <button type="submit" class="btn primary">Create Account</button>
+        <p class="form-msg" id="register-msg"></p>
       </form>
 
-      <button id="auth-toggle" class="toggle-link">Need an account? Register</button>
+      <p class="legal">An original voxel sandbox. No affiliation with any existing game.</p>
     </div>
   </div>
 
-  <div id="game-screen" class="screen">
-    <header class="topbar">
-      <div class="topbar-left">
-        <span class="topbar-title">Vaultoria</span>
+  <!-- ============ CHARACTER CUSTOMIZATION ============ -->
+  <div id="customize-screen" class="screen" style="display:none;">
+    <div class="customize-stage">
+      <div class="customize-left">
+        <h2>FORGE YOUR <span>AVATAR</span></h2>
+        <p class="sub">Your appearance defines how you appear to the inhabitants of Voidoria.</p>
+        <canvas id="avatar-preview" width="240" height="360"></canvas>
+        <button id="avatar-random" class="btn ghost">Randomize</button>
       </div>
-      <div class="topbar-right">
-        <span id="header-level" class="badge">Lv.1</span>
-        <span id="header-coins" class="coin-display">0</span>
-        <span id="header-username" class="user-display"></span>
-        <button id="logout-btn" class="btn btn-ghost">Log out</button>
+      <div class="customize-right">
+        <div class="cc-group">
+          <h3>Skin</h3>
+          <div class="swatches" data-target="skinTone">
+            <button class="sw" data-v="#e0ac69" style="background:#e0ac69"></button>
+            <button class="sw" data-v="#f2c9a0" style="background:#f2c9a0"></button>
+            <button class="sw" data-v="#c68642" style="background:#c68642"></button>
+            <button class="sw" data-v="#8d5524" style="background:#8d5524"></button>
+            <button class="sw" data-v="#6b3a1f" style="background:#6b3a1f"></button>
+            <button class="sw" data-v="#5a3b8a" style="background:#5a3b8a"></button>
+          </div>
+        </div>
+        <div class="cc-group">
+          <h3>Hair</h3>
+          <div class="rowbtn">
+            <button class="cbtn" data-field="hairStyle" data-v="short">Short</button>
+            <button class="cbtn" data-field="hairStyle" data-v="long">Long</button>
+            <button class="cbtn" data-field="hairStyle" data-v="mohawk">Mohawk</button>
+            <button class="cbtn" data-field="hairStyle" data-v="none">Bald</button>
+          </div>
+          <div class="swatches" data-target="hairColor">
+            <button class="sw" data-v="#1a1a1a" style="background:#1a1a1a"></button>
+            <button class="sw" data-v="#3b2a1a" style="background:#3b2a1a"></button>
+            <button class="sw" data-v="#c9985b" style="background:#c9985b"></button>
+            <button class="sw" data-v="#e0d9c8" style="background:#e0d9c8"></button>
+            <button class="sw" data-v="#7b2d4e" style="background:#7b2d4e"></button>
+            <button class="sw" data-v="#25337a" style="background:#25337a"></button>
+          </div>
+        </div>
+        <div class="cc-group">
+          <h3>Face</h3>
+          <div class="rowbtn">
+            <button class="cbtn" data-field="face" data-v="default">Default</button>
+            <button class="cbtn" data-field="face" data-v="scar">Scarred</button>
+            <button class="cbtn" data-field="face" data-v="mask">Masked</button>
+          </div>
+        </div>
+        <div class="cc-group">
+          <h3>Outfit</h3>
+          <label class="mini">Shirt
+            <input type="color" id="outfit-shirt" value="#2e7d9a" />
+          </label>
+          <label class="mini">Pants
+            <input type="color" id="outfit-pants" value="#3f4c66" />
+          </label>
+          <label class="mini">Shoes
+            <input type="color" id="outfit-shoes" value="#2b2b2b" />
+          </label>
+        </div>
+        <div class="cc-group">
+          <h3>Accessory</h3>
+          <div class="rowbtn">
+            <button class="cbtn" data-field="accessory" data-v="none">None</button>
+            <button class="cbtn" data-field="accessory" data-v="necklace">Necklace</button>
+            <button class="cbtn" data-field="accessory" data-v="crown">Crown</button>
+          </div>
+        </div>
+        <button id="customize-play" class="btn primary big">PLAY</button>
+        <p class="form-msg" id="customize-msg"></p>
       </div>
-    </header>
-
-    <nav class="tab-bar">
-      <button class="tab active" data-tab="dashboard">Dashboard</button>
-      <button class="tab" data-tab="shop">Shop</button>
-      <button class="tab" data-tab="auction">Auction</button>
-      <button class="tab" data-tab="jobs">Jobs</button>
-      <button class="tab" data-tab="inventory">Inventory</button>
-      <button class="tab" data-tab="trades">Trades</button>
-      <button class="tab" data-tab="leaderboard">Leaderboard</button>
-      <button class="tab tab-admin hidden" data-tab="admin">Admin</button>
-    </nav>
-
-    <main class="content">
-      <div id="dashboard-tab" class="tab-panel active"></div>
-      <div id="shop-tab" class="tab-panel"></div>
-      <div id="auction-tab" class="tab-panel"></div>
-      <div id="jobs-tab" class="tab-panel"></div>
-      <div id="inventory-tab" class="tab-panel"></div>
-      <div id="trades-tab" class="tab-panel"></div>
-      <div id="leaderboard-tab" class="tab-panel"></div>
-      <div id="admin-tab" class="tab-panel"></div>
-    </main>
+    </div>
   </div>
 
-  <script src="/js/api.js"></script>
-  <script src="/js/ui.js"></script>
-  <script src="/js/auth.js"></script>
-  <script src="/js/app.js"></script>
+  <!-- ============ GAME ============ -->
+  <div id="game" style="display:none;">
+    <canvas id="game-canvas"></canvas>
+
+    <!-- HUD -->
+    <div id="hud">
+      <div id="hud-topbar">
+        <div class="brand">VOIDORIA</div>
+        <div id="hud-coords">0, 0, 0 &middot; Overworld</div>
+        <div id="hud-currency">$10,000</div>
+        <div class="top-right">
+          <button id="btn-menu" class="icon-btn" title="Menu">&#9776;</button>
+          <button id="btn-chat-toggle" class="icon-btn" title="Chat">&#128172;</button>
+        </div>
+      </div>
+      <div id="hud-bars">
+        <div class="bar-row">
+          <span class="bar-label">HP</span>
+          <div class="bar"><div id="bar-health" class="fill health"></div></div>
+          <span id="health-num" class="bar-num">20</span>
+        </div>
+        <div class="bar-row">
+          <span class="bar-label">HNGR</span>
+          <div class="bar"><div id="bar-hunger" class="fill hunger"></div></div>
+          <span id="hunger-num" class="bar-num">20</span>
+        </div>
+        <div class="bar-row">
+          <span class="bar-label">XP</span>
+          <div class="bar"><div id="bar-xp" class="fill xp"></div></div>
+          <span id="level-num" class="bar-num">Lv 1</span>
+        </div>
+      </div>
+      <div id="hotbar">
+        <div class="hotbar-slot" data-hotbar="0"><span class="amt"></span></div>
+        <div class="hotbar-slot" data-hotbar="1"><span class="amt"></span></div>
+        <div class="hotbar-slot" data-hotbar="2"><span class="amt"></span></div>
+        <div class="hotbar-slot" data-hotbar="3"><span class="amt"></span></div>
+        <div class="hotbar-slot" data-hotbar="4"><span class="amt"></span></div>
+        <div class="hotbar-slot" data-hotbar="5"><span class="amt"></span></div>
+        <div class="hotbar-slot" data-hotbar="6"><span class="amt"></span></div>
+        <div class="hotbar-slot" data-hotbar="7"><span class="amt"></span></div>
+        <div class="hotbar-slot" data-hotbar="8"><span class="amt"></span></div>
+      </div>
+    </div>
+
+    <!-- Crosshair -->
+    <div id="crosshair"></div>
+    <div id="block-highlight"></div>
+
+    <!-- Chat -->
+    <div id="chat">
+      <div id="chat-messages"></div>
+      <input id="chat-input" type="text" placeholder="Press T to chat. Try /bounty /tpa /bal /shop" autocomplete="off" />
+    </div>
+
+    <!-- Notifications -->
+    <div id="notifications"></div>
+
+    <!-- Teleport confirmations -->
+    <div id="tp-prompt" class="prompt" style="display:none;">
+      <p id="tp-prompt-text">Teleport request</p>
+      <button id="tp-accept" class="btn small primary">Accept</button>
+      <button id="tp-deny" class="btn small ghost">Deny</button>
+    </div>
+
+    <!-- Main menu overlay -->
+    <div id="menu-overlay" class="overlay" style="display:none;">
+      <div class="menu-panel">
+        <div class="menu-side">
+          <h2>VOIDORIA</h2>
+          <div class="menu-nav">
+            <button class="mnav active" data-panel="profile">Profile</button>
+            <button class="mnav" data-panel="inventory">Inventory</button>
+            <button class="mnav" data-panel="shop">Shop</button>
+            <button class="mnav" data-panel="auction">Auction House</button>
+            <button class="mnav" data-panel="teleport">Teleport</button>
+            <button class="mnav" data-panel="bounties">Bounties</button>
+            <button class="mnav" data-panel="homes">Homes</button>
+            <button class="mnav" data-panel="friends">Friends</button>
+            <button class="mnav" data-panel="settings">Settings</button>
+            <button class="mnav" data-panel="stats">Stats</button>
+            <button class="mnav" data-panel="void">The Void</button>
+          </div>
+          <button id="btn-logout" class="btn ghost">Logout</button>
+        </div>
+        <div class="menu-main">
+          <div id="panel-profile" class="panel active"></div>
+          <div id="panel-inventory" class="panel"></div>
+          <div id="panel-shop" class="panel"></div>
+          <div id="panel-auction" class="panel"></div>
+          <div id="panel-teleport" class="panel"></div>
+          <div id="panel-bounties" class="panel"></div>
+          <div id="panel-homes" class="panel"></div>
+          <div id="panel-friends" class="panel"></div>
+          <div id="panel-settings" class="panel"></div>
+          <div id="panel-stats" class="panel"></div>
+          <div id="panel-void" class="panel"></div>
+        </div>
+        <button id="btn-close-menu" class="btn ghost">Resume (&lt;ESC&gt;)</button>
+      </div>
+    </div>
+
+    <!-- Connecting overlay -->
+    <div id="connecting" class="overlay">
+      <div class="connecting-inner">
+        <div class="spin"></div>
+        <h2>Entering Voidoria...</h2>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/customization.js"></script>
+  <script type="module" src="js/engine.js"></script>
+  <script type="module" src="js/game.js"></script>
 </body>
 </html>
