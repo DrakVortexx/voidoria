@@ -158,6 +158,14 @@ import { io } from "../vendor/socket.io.esm.min.js";
       socket.on("connect", () => {
         state.connected = true;
         socket.emit("move", { x: state.profile.pos.x, y: state.profile.pos.y, z: state.profile.pos.z, onGround: true });
+        // Request the initial chunks so terrain appears immediately, without
+        // waiting for the player to click to lock the pointer (which is what
+        // normally triggers the movement loop / streamChunks).
+        if (state.engine) {
+          state.engine.streamChunks();
+          setTimeout(() => state.engine.streamChunks(), 250);
+          setTimeout(() => state.engine.streamChunks(), 800);
+        }
         resolve();
       });
 
@@ -434,7 +442,10 @@ import { io } from "../vendor/socket.io.esm.min.js";
 
   // ---------- Menu ----------
   function toggleMenu() {
-    if (UI.menuOverlay.style.display === "none") openMenu(); else closeMenu();
+    if (UI.menuOverlay.style.display === "none") {
+      activePanel = "inventory";
+      openMenu();
+    } else closeMenu();
   }
   async function openMenu() {
     UI.menuOverlay.style.display = "flex";
