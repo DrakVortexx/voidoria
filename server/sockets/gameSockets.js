@@ -147,9 +147,25 @@ class GameServer {
 
   async onLoadChunks(client, d) {
     const dim = d.dimension || client.dimension;
-    const ccxC = (d.cx === undefined || d.cx === null) ? Math.floor(client.x / CHUNK_SIZE) : Math.floor(d.cx);
-    const czC = (d.cz === undefined || d.cz === null) ? Math.floor(client.z / CHUNK_SIZE) : Math.floor(d.cz);
-    const vd = Math.min(6, d.viewDistance || VIEW_DISTANCE);
+    // When the client supplies explicit chunk coordinates, send just that one
+    // chunk (the client requests each chunk in its view radius individually).
+    // Only when coordinates are omitted do we fan out over the view distance
+    // (e.g. a client that streams by player position).
+    const hasCoord = d.cx !== undefined && d.cx !== null && d.cz !== undefined && d.cz !== null;
+    if (hasCoord) {
+      const cx = Math.floor(d.cx);
+      const cz = Math.floor(d.cz);
+      const k = `${dim}:${cx}:${cz}`;
+      const cached = client.chunkLoads.get(k);
+      if (!cached || cached.cx !== cx || cached.cz !== cz) {
+        this.sendChunkTo(client, dim, cx, cz);
+      }
+      return;
+    }
+
+    const ccxC = Math.floor(client.x / CHUNK_SIZE);
+    const czC = Math.floor(client.z / CHUNK_SIZE);
+    const vd = Math.min(4, d.viewDistance || VIEW_DISTANCE);
     const needed = new Set();
     for (let dx = -vd; dx <= vd; dx++) {
       for (let dz = -vd; dz <= vd; dz++) {

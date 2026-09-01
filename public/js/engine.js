@@ -46,6 +46,7 @@ import * as THREE from "../vendor/three.module.js";
       this.canvas = canvas;
       this.scene = null; this.camera = null; this.renderer = null;
       this.chunkMeshes = new Map(); // "cx:cz" -> THREE.Mesh
+      this.requested = new Set(); // "cx:cz" chunks we've asked the server for
       this.otherPlayers = new Map(); // id -> mesh
       this.blockCache = null; // dim + Map key->Uint8Array
       this.currentDimension = "overworld";
@@ -171,6 +172,7 @@ import * as THREE from "../vendor/three.module.js";
       if (mesh) { this.scene.remove(mesh); mesh.geometry.dispose(); }
       this.chunkMeshes.delete(k);
       this.ensureCache().delete(k);
+      this.requested.delete(k);
     }
 
     onBlockUpdate(data) {
@@ -367,8 +369,9 @@ import * as THREE from "../vendor/three.module.js";
         for (let dz = -dist; dz <= dist; dz++) {
           const cx = px + dx, cz = pz + dz;
           want.add(`${cx}:${cz}`);
-          if (!this.requested || !this.requested.has(`${cx}:${cz}`)) {
+          if (!this.requested.has(`${cx}:${cz}`)) {
             if (!this.chunkMeshes.has(`${cx}:${cz}`)) {
+              this.requested.add(`${cx}:${cz}`);
               this.socket.emit("loadChunks", { dimension: this.currentDimension, cx, cz, viewDistance: dist });
             }
           }
@@ -452,6 +455,8 @@ import * as THREE from "../vendor/three.module.js";
 
     resetDimension(dim) {
       this.currentDimension = dim;
+      this.ensureCache().clear();
+      this.requested.clear();
     }
 
     dispose() {
