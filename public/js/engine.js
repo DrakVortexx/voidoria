@@ -359,17 +359,17 @@ import * as THREE from "../vendor/three.module.js";
 
     streamChunks() {
       if (!this.socket || !this.socket.connected) return;
-      const dist = 3.5;
+      const dist = 4;
       const px = Math.floor(this.position.x / CHUNK);
       const pz = Math.floor(this.position.z / CHUNK);
       const want = new Set();
-      for (let dx = -Math.ceil(dist); dx <= Math.ceil(dist); dx++) {
-        for (let dz = -Math.ceil(dist); dz <= Math.ceil(dist); dz++) {
+      for (let dx = -dist; dx <= dist; dx++) {
+        for (let dz = -dist; dz <= dist; dz++) {
           const cx = px + dx, cz = pz + dz;
           want.add(`${cx}:${cz}`);
           if (!this.requested || !this.requested.has(`${cx}:${cz}`)) {
             if (!this.chunkMeshes.has(`${cx}:${cz}`)) {
-              this.socket.emit("loadChunks", { dimension: this.currentDimension, cx, cz, viewDistance: 3.5 });
+              this.socket.emit("loadChunks", { dimension: this.currentDimension, cx, cz, viewDistance: dist });
             }
           }
         }

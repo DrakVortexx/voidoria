@@ -177,6 +177,14 @@ import { io } from "../vendor/socket.io.esm.min.js";
 
       socket.on("world:init", (d) => {
         state.engine.resetDimension(d.isVoid ? "void" : "overworld");
+        // The server confirms the session here; request the spawn area now and
+        // a few times over the next moments so terrain renders immediately even
+        // if the earlier connect-time request raced connection setup.
+        if (state.engine) {
+          state.engine.streamChunks();
+          setTimeout(() => state.engine.streamChunks(), 300);
+          setTimeout(() => state.engine.streamChunks(), 1000);
+        }
       });
 
       socket.on("chunk", (d) => state.engine.onChunk(d));
