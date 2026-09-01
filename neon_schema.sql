@@ -208,7 +208,6 @@ CREATE TABLE "player_settings" (
   auto_accept_tpa_here  BOOLEAN NOT NULL DEFAULT false,
   chat_visible          BOOLEAN NOT NULL DEFAULT true,
   chat_notifications    BOOLEAN NOT NULL DEFAULT true,
-  allow_pvp             BOOLEAN NOT NULL DEFAULT true,
   show_scoreboard       BOOLEAN NOT NULL DEFAULT true,
   notifications         BOOLEAN NOT NULL DEFAULT true
 );

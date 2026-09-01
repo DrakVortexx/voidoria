@@ -200,7 +200,6 @@ model PlayerSetting {
   autoAcceptTpaHere Boolean @default(false) @map("auto_accept_tpa_here")
   chatVisible     Boolean @default(true) @map("chat_visible")
   chatNotifications Boolean @default(true) @map("chat_notifications")
-  allowPvp        Boolean @default(true) @map("allow_pvp")
   showScoreboard  Boolean @default(true) @map("show_scoreboard")
   notifications   Boolean @default(true)
   user            User    @relation(fields: [userId], references: [id], onDelete: Cascade)

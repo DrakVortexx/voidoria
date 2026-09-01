@@ -870,7 +870,6 @@ import { io } from "../vendor/socket.io.esm.min.js";
       ["autoAcceptTpaHere", "Auto-accept TPAHere", state.settings?.autoAcceptTpaHere ?? false],
       ["chatVisible", "Show chat", state.settings?.chatVisible ?? true],
       ["chatNotifications", "Chat notifications", state.settings?.chatNotifications ?? true],
-      ["allowPvp", "Allow PvP", state.settings?.allowPvp ?? true],
       ["showScoreboard", "Show scoreboard", state.settings?.showScoreboard ?? true],
       ["notifications", "Notifications", state.settings?.notifications ?? true],
     ];
@@ -881,7 +880,7 @@ import { io } from "../vendor/socket.io.esm.min.js";
     el.querySelectorAll("[data-k]").forEach((c) => c.addEventListener("change", async (e) => {
       try {
         await API.player.updateSettings({ [e.target.dataset.k]: e.target.checked });
-        if (e.target.dataset.k === "allowPvp" || e.target.dataset.k === "allowTpa" || e.target.dataset.k === "allowTpaHere") {
+        if (e.target.dataset.k === "allowTpa" || e.target.dataset.k === "allowTpaHere") {
           state.settings = await API.player.settings();
         }
         notice("Setting saved");

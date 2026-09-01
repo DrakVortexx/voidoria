@@ -104,7 +104,7 @@ router.get("/settings", async (req, res) => {
 });
 
 router.put("/settings", async (req, res) => {
-  const allowed = ["allowTpa","allowTpaHere","autoAcceptTpa","autoAcceptTpaHere","chatVisible","chatNotifications","allowPvp","showScoreboard","notifications"];
+  const allowed = ["allowTpa","allowTpaHere","autoAcceptTpa","autoAcceptTpaHere","chatVisible","chatNotifications","showScoreboard","notifications"];
   const data = {};
   let changed = false;
   for (const k of allowed) {

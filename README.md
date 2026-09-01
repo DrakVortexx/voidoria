@@ -25,7 +25,7 @@
 - **Server Shop** (server-controlled prices in `shop_items`) and **Auction House** (player→player listings in `auction_listings`) are fully separate systems
 - `/shop` (buy/sell from the server) and `/ah` (player listings, search/sort/categories) with commands `/shop` `/sell` `/sellall` `/ah`
 - Teleportation: `/spawn`, `/rtp`, `/tpa`, `/tpahere`, `/tpaccept`, `/tpdeny`, `/home`, `/sethome`
-- Settings panel (TPA/TPAHere/PvP/chat/notifications) persisted per user
+- Settings panel (TPA/TPAHere/chat/notifications) persisted per user; PvP is always enabled
 - Bases: build anywhere; block changes persist
 - Bounties: `/bounty <player> <amount>` and `/bounties`
 - **The Void** dimension with unique terrain and **Void Shards**

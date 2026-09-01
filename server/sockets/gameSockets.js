@@ -295,18 +295,6 @@ class GameServer {
     if (target.dimension !== client.dimension) return;
     if (Date.now() < target.invulnerableUntil) return;
 
-    // PvP setting check
-    const tsettings = target.user.settings;
-    if (tsettings && tsettings.allowPvp === false) {
-      client.socket.emit("error", { error: "Target has PvP disabled" });
-      return;
-    }
-    const ssettings = client.user.settings;
-    if (ssettings && ssettings.allowPvp === false) {
-      client.socket.emit("error", { error: "You have PvP disabled" });
-      return;
-    }
-
     // damage from held weapon
     const held = d.heldItem || "item:wood_sword";
     const heldDef = getItem(held);
