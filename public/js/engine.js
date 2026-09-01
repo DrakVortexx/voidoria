@@ -59,6 +59,7 @@ import * as THREE from "../vendor/three.module.js";
       this.socket = null;
       this.locked = false;
       this.raytLastPos = null;
+      this.terrainReady = false; // hover until the first chunk renders
     }
 
     init() {
@@ -159,6 +160,7 @@ import * as THREE from "../vendor/three.module.js";
       try {
         this.buildChunkMesh(data.cx, data.cz);
         this.ensureChunkNeighbors(data.cx, data.cz);
+        if (this.chunkMeshes.size > 0) this.terrainReady = true;
       } catch (e) {
         console.error("buildChunkMesh failed", data.cx, data.cz, e);
       }
@@ -316,21 +318,29 @@ import * as THREE from "../vendor/three.module.js";
         this.position.y = Math.max(1, Math.min(WORLD_H - 1, this.position.y + vy));
         this.onGround = false;
       } else {
-        // gravity
-        this.velocity.y -= 0.018;
-        const ny = this.position.y + this.velocity.y;
-        if (this.collides(this.position.x, ny, this.position.z)) {
+        if (!this.terrainReady) {
+          // Hover until at least one chunk has rendered. Without this, gravity
+          // runs against an empty block cache while chunks stream in and the
+          // player falls straight through the world before it exists.
           this.velocity.y = 0;
-          this.onGround = true;
+          this.onGround = false;
         } else {
-          this.position.y = ny;
-          this.onGround = false;
+          // gravity
+          this.velocity.y -= 0.018;
+          const ny = this.position.y + this.velocity.y;
+          if (this.collides(this.position.x, ny, this.position.z)) {
+            this.velocity.y = 0;
+            this.onGround = true;
+          } else {
+            this.position.y = ny;
+            this.onGround = false;
+          }
+          if (this.keys["Space"] && this.onGround) {
+            this.velocity.y = 0.32;
+            this.onGround = false;
+          }
+          if (this.position.y < 1) { this.position.y = 1; this.velocity.y = 0; }
         }
-        if (this.keys["Space"] && this.onGround) {
-          this.velocity.y = 0.32;
-          this.onGround = false;
-        }
-        if (this.position.y < 1) { this.position.y = 1; this.velocity.y = 0; }
       }
 
       // send to server (throttled)
@@ -378,14 +388,21 @@ import * as THREE from "../vendor/three.module.js";
           if (this.chunkMeshes.has(ck)) continue;        // already rendered
           if (this.pendingChunks.has(ck) && !force) continue; // in flight
           if (!toRequest.some((c) => c.ck === ck)) {
-            toRequest.push({ ck, cx, cz });
+            toRequest.push({ ck, cx, cz, ring: Math.max(Math.abs(dx), Math.abs(dz)) });
           }
         }
       }
+      // nearest ring first so the area around the player becomes solid quickly
+      toRequest.sort((a, b) => a.ring - b.ring);
 
-      for (const { ck, cx, cz } of toRequest) {
-        this.pendingChunks.add(ck);
-        this.socket.emit("loadChunks", { dimension: this.currentDimension, cx, cz, viewDistance: dist });
+      // Throttle the burst: requesting all 81 chunks at once makes the server
+      // and the mesh builder do everything in a single frame. Emit a handful
+      // per call and let the movement loop's 70ms ticks top the rest up.
+      const perCall = 10;
+      for (const c of toRequest.slice(0, perCall)) {
+        if (this.pendingChunks.has(c.ck)) continue;
+        this.pendingChunks.add(c.ck);
+        this.socket.emit("loadChunks", { dimension: this.currentDimension, cx: c.cx, cz: c.cz, viewDistance: dist });
       }
 
       // Unload chunks that are far outside the current view area. Only the
@@ -474,6 +491,7 @@ import * as THREE from "../vendor/three.module.js";
       this.currentDimension = dim;
       this.pendingChunks.clear();
       this.ensureCache().clear();
+      this.terrainReady = false;
     }
 
     dispose() {

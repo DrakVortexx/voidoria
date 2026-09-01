@@ -83,6 +83,22 @@ function run() {
     assert.deepStrictEqual(Buffer.from(c), Buffer.from(c2));
   });
 
+  test("Overworld generates trees (wood + leaves)", () => {
+    const g = new TerrainGenerator({ seed: 42 });
+    let wood = 0, leaves = 0;
+    for (let cx = -4; cx <= 4; cx++) {
+      for (let cz = -4; cz <= 4; cz++) {
+        const c = g.generateChunk(cx, cz);
+        for (let i = 0; i < c.length; i++) {
+          if (c[i] === BLOCK.WOOD) wood++;
+          else if (c[i] === BLOCK.LEAVES) leaves++;
+        }
+      }
+    }
+    assert.ok(wood > 0, `expected wood blocks, got ${wood}`);
+    assert.ok(leaves > 0, `expected leaves blocks, got ${leaves}`);
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   if (fail > 0) process.exit(1);
 }

@@ -20,7 +20,10 @@ class WorldEngine {
     this._persistQueue = new Set();
     this._persistTimer = null;
     this.terrainVersion = 2; // bump when terrain formula changes
-    this.genVersion = 1;
+    // Bump this whenever terrain generation changes (biomes, trees, ores) so
+    // already-persisted chunks are regenerated on next load. Player block
+    // modifications are re-applied on top of the fresh terrain.
+    this.genVersion = 2;
     this.inFlight = new Map(); // key -> Promise<entry> (dedup concurrent loads)
     this._queue = [];         // pending load jobs awaiting a concurrency slot
     this._active = 0;         // number of load jobs currently executing
@@ -311,6 +314,16 @@ class WorldEngine {
     const entry = this.cache.get(key(dimension, cx, cz));
     if (!entry) return null;
     return this._surfaceTop(entry.blocks, x - cx * CHUNK_SIZE, z - cz * CHUNK_SIZE);
+  }
+
+  // Async surface height (loads/generates the chunk if needed). Returns the
+  // Y of the top solid block under the column, or 1 when nothing is solid.
+  async getSurfaceY(dimension, x, z) {
+    const cx = Math.floor(x / CHUNK_SIZE);
+    const cz = Math.floor(z / CHUNK_SIZE);
+    const res = await this.getChunk(dimension, cx, cz);
+    const top = this._surfaceTop(res.blocks, x - cx * CHUNK_SIZE, z - cz * CHUNK_SIZE);
+    return Math.max(1, top);
   }
 
   _surfaceTop(blocks, lx, lz) {

@@ -177,6 +177,13 @@ import { io } from "../vendor/socket.io.esm.min.js";
 
       socket.on("world:init", (d) => {
         state.engine.resetDimension(d.isVoid ? "void" : "overworld");
+        // The server corrects the spawn height to the actual surface, so snap
+        // to its position instead of our cached profile (which may be mid-air).
+        if (d.player && typeof d.player.x === "number") {
+          state.engine.position.x = d.player.x;
+          state.engine.position.y = d.player.y;
+          state.engine.position.z = d.player.z;
+        }
         // The server confirms the session here; request the spawn area now and
         // a few times over the next moments so terrain renders immediately even
         // if the earlier connect-time request raced connection setup.

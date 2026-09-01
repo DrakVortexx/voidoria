@@ -202,41 +202,52 @@ class TerrainGenerator {
     if (isRiver) return;
     const rng = mulberry32(hashSeed(this.seed, `decor-${wx}-${wz}`));
     const r = rng();
-    const topIdx = yIndex(lx, surface, lz);
-    const top = blocks[topIdx];
+    // `surface` is one above the highest solid block; the grass top is at
+    // surface-1 and the first air block above ground is at `surface`.
+    const topY = surface - 1;
+    const top = blocks[yIndex(lx, topY, lz)];
+    if (blocks[yIndex(lx, surface, lz)] !== BLOCK.AIR) return; // under water
 
     if (top === BLOCK.SAND) {
-      if (r < 0.05 && blocks[yIndex(lx, surface - 1, lz)] === BLOCK.SAND) {
+      if (r < 0.05 && blocks[yIndex(lx, surface - 2, lz)] === BLOCK.SAND) {
         for (let h = 1; h <= 2 + Math.floor(rng() * 2); h++) {
-          if (surface + h < WORLD_HEIGHT) blocks[yIndex(lx, surface + h, lz)] = BLOCK.CACTUS;
+          if (surface + h - 1 < WORLD_HEIGHT) blocks[yIndex(lx, surface - 1 + h, lz)] = BLOCK.CACTUS;
         }
       }
       return;
     }
     if (top === BLOCK.SNOW) return;
     if (top === BLOCK.GRASS) {
-      if (biome.hum > 0.25) {
-        if (r < 0.22) {
-          // tree
+      if (biome.hum > 0.15) {
+        // forests: trees are common
+        if (r < 0.28) {
           this._placeTree(blocks, lx, lz, surface, rng);
-        } else if (r < 0.3) {
-          if (surface + 1 < WORLD_HEIGHT) blocks[yIndex(lx, surface + 1, lz)] = BLOCK.FLOWER;
+        } else if (r < 0.32 && surface + 1 < WORLD_HEIGHT) {
+          blocks[yIndex(lx, surface, lz)] = BLOCK.FLOWER;
+        }
+      } else if (biome.hum > -0.1 && biome.temp < 0.45) {
+        // temperate plains: scattered trees
+        if (r < 0.09) {
+          this._placeTree(blocks, lx, lz, surface, rng);
+        } else if (r < 0.13 && surface + 1 < WORLD_HEIGHT) {
+          blocks[yIndex(lx, surface, lz)] = BLOCK.FLOWER;
         }
       } else if (r < 0.04 && surface + 1 < WORLD_HEIGHT) {
-        blocks[yIndex(lx, surface + 1, lz)] = BLOCK.FLOWER;
+        blocks[yIndex(lx, surface, lz)] = BLOCK.FLOWER;
       }
     }
   }
 
   _placeTree(blocks, lx, lz, surface, rng) {
+    // The grass top is at `surface-1`; the trunk grows upward from `surface`.
     const trunkH = 4 + Math.floor(rng() * 3);
-    for (let h = 1; h <= trunkH; h++) {
+    for (let h = 0; h < trunkH; h++) {
       const y = surface + h;
       if (y >= WORLD_HEIGHT) return;
       const idx = yIndex(lx, y, lz);
       if (blocks[idx] === BLOCK.AIR) blocks[idx] = BLOCK.WOOD;
     }
-    const top = surface + trunkH;
+    const top = surface + trunkH - 1;
     const leafStart = top - 2;
     for (let dy = 0; dy <= 2; dy++) {
       const y = leafStart + dy;
@@ -249,9 +260,8 @@ class TerrainGenerator {
           if (nx < 0 || nx >= CHUNK_SIZE || nz < 0 || nz >= CHUNK_SIZE) continue;
           const idx = yIndex(nx, y, nz);
           if (blocks[idx] === BLOCK.AIR || blocks[idx] === BLOCK.LEAVES) {
-            if (!(dx === 0 && dz === 0 && y < top)) {
-              blocks[idx] = BLOCK.LEAVES;
-            }
+            if (dx === 0 && dz === 0 && y < top) continue; // keep trunk wood
+            blocks[idx] = BLOCK.LEAVES;
           }
         }
       }

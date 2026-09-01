@@ -43,7 +43,7 @@ class GameServer {
     });
   }
 
-  onConnection(socket) {
+  async onConnection(socket) {
     const user = socket.data.user;
     const profile = socket.data.profile;
     if (!profile) {
@@ -52,16 +52,26 @@ class GameServer {
       return;
     }
 
+    // Compute a grounded spawn: fresh sessions used to spawn at the default
+    // y=70 (high in the sky) and fall through the world while terrain streamed
+    // in. Keep the saved height unless it is missing or floating far above the
+    // actual surface.
+    const dim = profile.dimension || OVERWORLD;
+    const spawnX = typeof profile.posX === "number" ? profile.posX : 8;
+    const spawnZ = typeof profile.posZ === "number" ? profile.posZ : 8;
+    const savedY = typeof profile.posY === "number" ? profile.posY : null;
+    let spawnY = savedY || 70;
+
     const client = {
       socket,
       user,
       profile,
-      x: profile.posX || 8,
-      y: profile.posY || 70,
-      z: profile.posZ || 8,
+      x: spawnX,
+      y: spawnY,
+      z: spawnZ,
       yaw: profile.rotationY || 0,
       pitch: 0,
-      dimension: profile.dimension || OVERWORLD,
+      dimension: dim,
       health: profile.health ?? 20,
       maxHealth: 20,
       hunger: profile.hunger ?? 20,
@@ -71,18 +81,11 @@ class GameServer {
       subscribed: new Set(),
       lastAttackAt: 0,
       invulnerableUntil: 0,
+      worldInited: false,
     };
 
     this.players.set(user.id, client);
     this.sockets.set(socket.id, client);
-
-    socket.emit("world:init", {
-      seed: this.world.seed,
-      border: 5000,
-      dimensions: [OVERWORLD, VOID],
-      isVoid: profile.dimension === VOID,
-      player: this._publicOf(client),
-    });
 
     socket.on("move", (d) => this.onMove(client, d));
     socket.on("loadChunks", (d) => this.onLoadChunks(client, d));
@@ -93,8 +96,34 @@ class GameServer {
     socket.on("attack", (d) => this.onAttack(client, d));
     socket.on("disconnect", () => this.onDisconnect(client));
 
+    if (dim === OVERWORLD) {
+      try {
+        const groundY = await this.world.getSurfaceY(OVERWORLD, spawnX, spawnZ);
+        if (groundY > 2 && (!savedY || savedY - groundY > 12)) {
+          spawnY = groundY + 1;
+          client.y = spawnY;
+        }
+      } catch (e) {
+        // keep saved/default height; the client hovers until terrain renders
+      }
+    }
+
+    client.worldInited = true;
+    socket.emit("world:init", {
+      seed: this.world.seed,
+      border: 5000,
+      dimensions: [OVERWORLD, VOID],
+      isVoid: dim === VOID,
+      player: this._publicOf(client),
+    });
+
     this.emitStats(client);
     socket.broadcast.emit("player:join", { id: user.id, name: profile.displayName });
+
+    // persist the corrected spawn so future sessions already sit on terrain
+    if (spawnY !== savedY) {
+      void this.persist(client);
+    }
   }
 
 
@@ -115,6 +144,11 @@ class GameServer {
     client.lastMoveAt = now;
 
     if (!d || typeof d.x !== "number") return;
+
+    // Drop movement packets that race the world:init handshake so the
+    // server-corrected spawn height can't be clobbered by the client's
+    // cached profile position.
+    if (!client.worldInited) return;
 
     const dx = d.x - client.x, dy = d.y - client.y, dz = d.z - client.z;
     const dist = Math.sqrt(dx*dx + dz*dz);
