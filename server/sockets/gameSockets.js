@@ -81,6 +81,7 @@ class GameServer {
       subscribed: new Set(),
       lastAttackAt: 0,
       invulnerableUntil: 0,
+      fallStartY: null, // track the apex of a fall for fall damage
       worldInited: false,
     };
 
@@ -170,6 +171,19 @@ class GameServer {
     client.x = d.x; client.y = d.y; client.z = d.z;
     client.yaw = d.yaw || 0; client.pitch = d.pitch || 0;
     client.onGround = !!d.onGround;
+
+    // Fall damage: remember the highest point of the fall and apply damage the
+    // moment the player lands.
+    if (!client.onGround) {
+      const prev = client.fallStartY;
+      client.fallStartY = prev == null ? d.y : Math.max(prev, d.y);
+    } else if (client.fallStartY != null) {
+      const fall = client.fallStartY - d.y;
+      client.fallStartY = null;
+      if (fall > 3.2 && client.dimension !== VOID) {
+        void this.fallDamage(client, fall);
+      }
+    }
 
     // persist position occasionally
     if (Math.random() < 0.02) {
@@ -375,6 +389,19 @@ class GameServer {
     }
   }
 
+  async fallDamage(client, dist) {
+    if (dist <= 3) return;
+    if (client.invulnerableUntil && client.invulnerableUntil > Date.now()) return;
+    const dmg = Math.min(Math.floor(dist) - 2, 20);
+    if (dmg <= 0) return;
+    client.health -= dmg;
+    client.socket.emit("damage", { from: null, amount: dmg, health: client.health });
+    this.emitStats(client);
+    if (client.health <= 0) {
+      await this.handleDeath(client, null);
+    }
+  }
+
   async voidDamage(client) {
     // apply void damage unless protected or invulnerable
     if (client.protectedUntil && client.protectedUntil > Date.now()) {
@@ -425,6 +452,7 @@ class GameServer {
       ? { x: 8.5, y: 70, z: 8.5, dimension: OVERWORLD }
       : { x: 8.5, y: 70, z: 8.5, dimension: OVERWORLD };
     victim.x = sp.x; victim.y = sp.y; victim.z = sp.z; victim.dimension = sp.dimension;
+    victim.fallStartY = null;
     victim.socket.emit("respawn", sp);
     this.broadcastMoveAt(victim);
     this.emitStats(victim);

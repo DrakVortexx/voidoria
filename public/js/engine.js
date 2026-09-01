@@ -12,6 +12,20 @@ import * as THREE from "../vendor/three.module.js";
   };
   const OPAQUE = { 0: false, 6: false, 8: false, 10: false, 12: false, 13: false, 25: false };
 
+  // Minecraft-style movement tuning. Speeds are blocks/frame at 60fps and are
+  // delta-scaled to the refresh rate so the feel stays consistent on any display.
+  const PHYS = {
+    WALK: 0.08,     // ≈4.8 blocks/s
+    SPRINT: 0.13,   // Ctrl, ≈7.8 blocks/s
+    SNEAK: 0.05,    // Shift while grounded, ≈3 blocks/s (won't walk off ledges)
+    FLY: 0.35,
+    GRAVITY: 0.026, // per tick^2
+    JUMP: 0.25,     // peak ≈ JUMP^2/(2*GRAVITY) ≈ 1.2 blocks (Minecraft jump)
+    TERMINAL: -0.95,
+    AIR_CTRL: 0.6,  // horizontal steering factor while airborne
+    STEP: 1.1,      // ~1-block auto step tolerance for ledge framping
+  };
+
   // voxel raycast (DDA)
   function raycast(origin, dir, getBlock, maxDist) {
     let x = Math.floor(origin.x), y = Math.floor(origin.y), z = Math.floor(origin.z);
@@ -60,6 +74,7 @@ import * as THREE from "../vendor/three.module.js";
       this.locked = false;
       this.raytLastPos = null;
       this.terrainReady = false; // hover until the first chunk renders
+      this.dropEntities = []; // cosmetic mined-block pops (gravity+spin+magnet)
     }
 
     init() {
@@ -184,9 +199,14 @@ import * as THREE from "../vendor/three.module.js";
       const k = `${cx}:${cz}`;
       const arr = cache.get(k);
       if (arr) {
-        arr[(data.y * CHUNK + lz) * CHUNK + lx] = data.block;
+        const idx = (data.y * CHUNK + lz) * CHUNK + lx;
+        const prev = arr[idx];
+        arr[idx] = data.block;
         this.rebuildChunkMesh(cx, cz);
         this.ensureChunkNeighbors(cx, cz);
+        if (data.block === 0 && prev !== 0 && prev !== undefined) {
+          this.spawnDrop(data.x + 0.5, data.y + 0.5, data.z + 0.5, prev);
+        }
       }
     }
 
@@ -197,6 +217,57 @@ import * as THREE from "../vendor/three.module.js";
       const arr = this.ensureCache().get(`${cx}:${cz}`);
       if (!arr) return 0;
       return arr[(y * CHUNK + lz) * CHUNK + lx];
+    }
+
+    // ---------- dropped block visuals (mined-block pop) ----------
+    spawnDrop(x, y, z, blockId) {
+      if (this.dropEntities.length > 48) return; // don't let them pile up
+      const mat = new THREE.MeshLambertMaterial({ color: COLORS[blockId] ?? 0xffffff });
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.26, 0.26), mat);
+      mesh.position.set(x, y, z);
+      this.scene.add(mesh);
+      this.dropEntities.push({
+        mesh,
+        vel: { x: (Math.random() - 0.5) * 0.06, y: 0.14, z: (Math.random() - 0.5) * 0.06 },
+        t: 0,
+      });
+    }
+
+    updateDrops(dt) {
+      if (this.dropEntities.length === 0) return;
+      const kept = [];
+      for (const d of this.dropEntities) {
+        d.t += dt;
+        d.mesh.rotation.y += 0.12 * dt;
+        d.mesh.rotation.x += 0.08 * dt;
+
+        const dx = this.position.x - d.mesh.position.x;
+        const dy = this.position.y - d.mesh.position.y;
+        const dz = this.position.z - d.mesh.position.z;
+        const dist = Math.hypot(dx, dy, dz);
+
+        if (dist < 2.2 && this.terrainReady) {
+          // gentle magnet toward the player once close
+          const pull = 0.12 * dt;
+          d.mesh.position.x += dx / (dist || 1) * pull;
+          d.mesh.position.y += (dy / (dist || 1) + 0.03) * pull;
+          d.mesh.position.z += dz / (dist || 1) * pull;
+        } else {
+          d.vel.y -= 0.018 * dt;
+          d.mesh.position.x += d.vel.x * dt;
+          d.mesh.position.y = Math.max(0.35, d.mesh.position.y + d.vel.y * dt);
+          d.mesh.position.z += d.vel.z * dt;
+        }
+
+        if (dist < 0.7 || d.t > 1.4) {
+          this.scene.remove(d.mesh);
+          d.mesh.geometry.dispose();
+          d.mesh.material.dispose();
+          continue;
+        }
+        kept.push(d);
+      }
+      this.dropEntities = kept;
     }
 
     // ---------- meshing ----------
@@ -260,14 +331,18 @@ import * as THREE from "../vendor/three.module.js";
 
     // ---------- game loop / movement ----------
     startLoop() {
-      const loop = () => {
+      let last = performance.now();
+      const loop = (t) => {
         requestAnimationFrame(loop);
-        if (this.locked) this.updateMovement();
+        const dt = Math.min(2.5, (t - last) / (1000 / 60)); // frames @60fps, clamped
+        last = t;
+        if (this.locked) this.updateMovement(dt);
+        this.updateDrops(dt);
         this.updateCamera();
         this.updateOtherPlayersVisual();
         this.renderer.render(this.scene, this.camera);
       };
-      loop();
+      requestAnimationFrame(loop);
     }
 
     updateCamera() {
@@ -293,54 +368,70 @@ import * as THREE from "../vendor/three.module.js";
       this.highlightTarget = hit || null;
     }
 
-    updateMovement() {
-      const speed = this.flying ? 0.35 : 0.12;
+    updateMovement(dt) {
       const dir = new THREE.Vector3();
       const forward = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
       const right = new THREE.Vector3(-Math.sin(this.yaw + Math.PI/2), 0, -Math.cos(this.yaw + Math.PI/2));
 
       if (this.keys["KeyW"]) dir.add(forward);
-      if (this.keys["KeyS"]) dir.sub(forward);
+      if (this.keys["KeyS"] && !this.keys["KeyW"]) dir.sub(forward);
       if (this.keys["KeyA"]) dir.add(right);
-      if (this.keys["KeyD"]) dir.sub(right);
-      dir.normalize();
+      if (this.keys["KeyD"] && !this.keys["KeyA"]) dir.sub(right);
+      if (dir.lengthSq() > 0) dir.normalize();
 
-      const moveX = dir.x * speed, moveZ = dir.z * speed;
-      // horizontal collision
-      const nx = this.position.x + moveX, nz = this.position.z + moveZ;
-      if (!this.collides(nx, this.position.y, this.position.z)) this.position.x = nx;
-      if (!this.collides(this.position.x, this.position.y, nz)) this.position.z = nz;
+      // Ground speed: walk, sprint (ControlLeft), sneak (ShiftLeft while grounded).
+      // While airborne steering is dampened (reduced air control, like Minecraft),
+      // and carrying momentum means you stop instantly the moment you land.
+      const sneaking = !this.flying && this.keys["ShiftLeft"] && this.onGround;
+      let speed = this.flying ? PHYS.FLY : PHYS.WALK;
+      if (!this.flying && this.onGround) {
+        if (this.keys["ControlLeft"]) speed = PHYS.SPRINT;
+        else if (this.keys["ShiftLeft"]) speed = PHYS.SNEAK;
+      }
+      if (!this.flying && !this.onGround) speed *= PHYS.AIR_CTRL;
+
+      const moveX = dir.x * speed * dt, moveZ = dir.z * speed * dt;
+
+      // Horizontal collision + sneak edge grip (don't walk off a ledge while sneaking).
+      const canStand = (x, z) => this.getBlockAt(Math.floor(x), Math.floor(this.position.y) - 1, Math.floor(z)) !== 0;
+      let nx = this.position.x + moveX, nz = this.position.z + moveZ;
+      if (!this.collides(nx, this.position.y, this.position.z) && (!sneaking || canStand(nx, this.position.z))) this.position.x = nx;
+      if (!this.collides(this.position.x, this.position.y, nz) && (!sneaking || canStand(this.position.x, nz))) this.position.z = nz;
 
       if (this.flying) {
         let vy = 0;
         if (this.keys["Space"]) vy = speed * 1.5;
         if (this.keys["ShiftLeft"]) vy = -speed * 1.5;
-        this.position.y = Math.max(1, Math.min(WORLD_H - 1, this.position.y + vy));
+        this.position.y = Math.max(1, Math.min(WORLD_H - 1, this.position.y + vy * dt));
+        this.onGround = false;
+      } else if (!this.terrainReady) {
+        // Hover until at least one chunk has rendered. Without this, gravity
+        // runs against an empty block cache while chunks stream in and the
+        // player falls straight through the world before it exists.
+        this.velocity.y = 0;
         this.onGround = false;
       } else {
-        if (!this.terrainReady) {
-          // Hover until at least one chunk has rendered. Without this, gravity
-          // runs against an empty block cache while chunks stream in and the
-          // player falls straight through the world before it exists.
+        // Gravity with a Minecraft-feel ~1.2 block jump.
+        this.velocity.y -= PHYS.GRAVITY * dt;
+        // Variable jump: releasing Space early cuts the upward arc short.
+        if (!this.keys["Space"] && this.velocity.y > 0) this.velocity.y *= Math.pow(0.72, dt);
+        if (this.velocity.y < PHYS.TERMINAL) this.velocity.y = PHYS.TERMINAL;
+
+        const ny = this.position.y + this.velocity.y * dt;
+        if (this.collides(this.position.x, ny, this.position.z)) {
+          // Landed (or bumped head): if moving down we just landed.
+          this.onGround = this.velocity.y <= 0;
           this.velocity.y = 0;
-          this.onGround = false;
         } else {
-          // gravity
-          this.velocity.y -= 0.018;
-          const ny = this.position.y + this.velocity.y;
-          if (this.collides(this.position.x, ny, this.position.z)) {
-            this.velocity.y = 0;
-            this.onGround = true;
-          } else {
-            this.position.y = ny;
-            this.onGround = false;
-          }
-          if (this.keys["Space"] && this.onGround) {
-            this.velocity.y = 0.32;
-            this.onGround = false;
-          }
-          if (this.position.y < 1) { this.position.y = 1; this.velocity.y = 0; }
+          this.position.y = ny;
+          this.onGround = false;
         }
+
+        if (this.keys["Space"] && this.onGround) {
+          this.velocity.y = PHYS.JUMP;
+          this.onGround = false;
+        }
+        if (this.position.y < 1) { this.position.y = 1; this.velocity.y = 0; this.onGround = true; }
       }
 
       // send to server (throttled)
