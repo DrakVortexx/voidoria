@@ -8,6 +8,7 @@
     "postinstall": "prisma generate",
     "dev": "node --watch server/index.js",
     "game:test": "node tests/terrain.test.js",
+    "chunk:test": "node tests/chunk.stream.test.js",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:seed": "node prisma/seed.js",

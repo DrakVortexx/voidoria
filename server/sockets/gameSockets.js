@@ -6,6 +6,7 @@ const { BLOCK, BLOCK_META } = require("../world/blocks");
 const { ITEMS, getItem, placeableBlock } = require("../world/items");
 const inventory = require("../services/inventory");
 const economy = require("../services/economy");
+const chunkMetrics = require("../world/chunkMetrics");
 
 const VIEW_DISTANCE = 3; // chunks radius
 
@@ -192,6 +193,7 @@ class GameServer {
       const { blocks } = await this.world.getChunk(dim, cx, cz);
       const keyM = `${dim}:${cx}:${cz}`;
       client.chunkLoads.set(keyM, { cx, cz });
+      chunkMetrics.counter.socketSends++;
       client.socket.emit("chunk", { dimension: dim, cx, cz, data: Buffer.from(blocks.buffer, blocks.byteOffset, blocks.byteLength).toString("base64") });
     } catch (e) {
       client.socket.emit("chunk:error", { cx, cz, error: e.message });

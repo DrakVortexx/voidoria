@@ -1,23 +1,30 @@
 const { TerrainGenerator, CHUNK_SIZE, WORLD_HEIGHT, yIndex, indexToXYZ, OVERWORLD, VOID } = require("./terrain");
-const chunkStore = require("./chunkStore");
+const realChunkStore = require("./chunkStore");
 const { BLOCK, BLOCK_META } = require("./blocks");
+const metrics = require("./chunkMetrics");
 
 const WORLD_VERSION = 1;
-const MAX_CACHED = 2048;
+const MAX_CACHED = 1024;
+const MAX_CONCURRENT_CHUNK_GENERATION = 4;
 
 function key(dim, cx, cz) {
   return `${dim}:${cx}:${cz}`;
 }
 
 class WorldEngine {
-  constructor({ seed }) {
+  constructor({ seed, chunkStore = realChunkStore }) {
     this.seed = seed;
+    this.chunkStore = chunkStore;
     this.cache = new Map();
     this.generators = {};
     this._persistQueue = new Set();
     this._persistTimer = null;
     this.terrainVersion = 2; // bump when terrain formula changes
     this.genVersion = 1;
+    this.inFlight = new Map(); // key -> Promise<entry> (dedup concurrent loads)
+    this._queue = [];         // pending load jobs awaiting a concurrency slot
+    this._active = 0;         // number of load jobs currently executing
+    metrics.init();
   }
 
   generator(dimension) {
@@ -27,37 +34,95 @@ class WorldEngine {
     return this.generators[dimension];
   }
 
-  async getChunk(dimension, cx, cz, { withData = true } = {}) {
+  async getChunk(dimension, cx, cz, opts = {}) {
+    const withData = opts.withData !== false;
     const k = key(dimension, cx, cz);
-    let entry = this.cache.get(k);
-    if (entry && entry.loaded) {
+    metrics.counter.requests++;
+
+    // 1. cache hit
+    const hit = this.cache.get(k);
+    if (hit && hit.loaded) {
+      metrics.counter.cacheHits++;
       this._touch(k);
-      if (withData) {
-        return { cx, cz, blocks: entry.blocks, modified: entry.modified };
-      }
-      return { cx, cz };
+      return this._result(hit, withData, cx, cz);
     }
 
-    entry = await this._loadOrGenerate(dimension, cx, cz);
-    this.cache.set(k, entry);
-    this._touch(k);
-    this._evict();
+    metrics.counter.cacheMisses++;
+
+    // 2. coalesce with an already in-flight load of the same chunk
+    const existing = this.inFlight.get(k);
+    if (existing) {
+      metrics.counter.inFlightJoins++;
+      const entry = await existing;
+      if (entry && entry.loaded) {
+        this._touch(k);
+        return this._result(entry, withData, cx, cz);
+      }
+    }
+
+    // 3. enqueue a bounded generation/load; concurrent callers share this promise
+    const p = this._enqueueLoad(dimension, cx, cz);
+    this.inFlight.set(k, p);
+    try {
+      const entry = await p;
+      return this._result(entry, withData, cx, cz);
+    } finally {
+      if (this.inFlight.get(k) === p) this.inFlight.delete(k);
+    }
+  }
+
+  _result(entry, withData, cx, cz) {
     if (withData) return { cx, cz, blocks: entry.blocks, modified: entry.modified };
     return { cx, cz };
   }
 
+  _enqueueLoad(dimension, cx, cz) {
+    // If generation for this key is already queued (scheduled but not yet
+    // started), return the same underlying promise so we never duplicate work.
+    const existing = this.inFlight.get(key(dimension, cx, cz));
+    if (existing) return existing;
+
+    metrics.gauge.queued++;
+    const p = new Promise((resolve, reject) => {
+      this._queue.push({ dimension, cx, cz, resolve, reject });
+    });
+    this._drain();
+    return p;
+  }
+
+  _drain() {
+    while (this._active < MAX_CONCURRENT_CHUNK_GENERATION && this._queue.length > 0) {
+      const job = this._queue.shift();
+      metrics.gauge.queued = Math.max(0, this._queue.length);
+      this._active++;
+      metrics.gauge.active = this._active;
+      this._loadOrGenerate(job.dimension, job.cx, job.cz)
+        .then((entry) => {
+          const k = key(job.dimension, job.cx, job.cz);
+          this.cache.set(k, entry);
+          this._touch(k);
+          this._evict();
+          metrics.gauge.cacheEntries = this.cache.size;
+          job.resolve(entry);
+        })
+        .catch((err) => job.reject(err))
+        .finally(() => {
+          this._active--;
+          metrics.gauge.active = this._active;
+          this._drain();
+        });
+    }
+  }
+
   async _loadOrGenerate(dimension, cx, cz) {
     const gen = this.generator(dimension);
-    const chunks0 = { cx, cz };
     const blocks = gen.generateChunk(cx, cz);
+    metrics.counter.generated++;
 
-    const loaded = await chunkStore.loadChunk(dimension, cx, cz, {
-      blocks,
-      worldVersion: this.worldVersionFor(dimension),
-    });
+    const loaded = await this._loadFromStore(dimension, cx, cz, blocks);
 
     if (loaded.generated) {
-      // use stored terrain + modifications
+      // use stored terrain + modifications (no DB write for existing chunks)
       return {
         cx, cz, dimension,
         blocks: this._applyMods(loaded.terrainData, loaded.modifications),
@@ -69,8 +134,8 @@ class WorldEngine {
       };
     }
 
-    // new chunk: generate and persist terrain
-    await chunkStore.createChunk(dimension, cx, cz, blocks, this.worldVersionFor(dimension));
+    // new chunk: persist terrain exactly once (upsert keeps it idempotent)
+    await this._createInStore(dimension, cx, cz, blocks);
     return {
       cx, cz, dimension,
       blocks,
@@ -80,6 +145,19 @@ class WorldEngine {
       loaded: true,
       _rowExisting: false,
     };
+  }
+
+  async _loadFromStore(dimension, cx, cz, blocks) {
+    metrics.counter.dbReads++;
+    return this.chunkStore.loadChunk(dimension, cx, cz, {
+      blocks,
+      worldVersion: this.worldVersionFor(dimension),
+    });
+  }
+
+  async _createInStore(dimension, cx, cz, blocks) {
+    metrics.counter.dbWrites++;
+    await this.chunkStore.createChunk(dimension, cx, cz, blocks, this.worldVersionFor(dimension));
   }
 
   _applyMods(base, mods) {
@@ -162,7 +240,7 @@ class WorldEngine {
   async _persistChunk(entry) {
     try {
       const mods = Array.from(entry.modified.entries());
-      await chunkStore.saveModifications(entry.dimension, entry.cx, entry.cz, mods, this.genVersion);
+      await this.chunkStore.saveModifications(entry.dimension, entry.cx, entry.cz, mods, this.genVersion);
     } catch (err) {
       console.error("Persist chunk error:", err);
     }
@@ -179,6 +257,10 @@ class WorldEngine {
         entry.dirty = false;
       }
     }
+  }
+
+  dispose() {
+    metrics.stop();
   }
 
   computeNeighbors(dimension, cx, cz) {

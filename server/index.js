@@ -125,6 +125,7 @@ function main() {
   process.on("SIGINT", async () => {
     console.log("Saving world...");
     await world.saveAll().catch((e) => console.error(e));
+    world.dispose?.();
     process.exit(0);
   });
 }

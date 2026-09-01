@@ -46,7 +46,7 @@ import * as THREE from "../vendor/three.module.js";
       this.canvas = canvas;
       this.scene = null; this.camera = null; this.renderer = null;
       this.chunkMeshes = new Map(); // "cx:cz" -> THREE.Mesh
-      this.requested = new Set(); // "cx:cz" chunks we've asked the server for
+      this.pendingChunks = new Set(); // "cx:cz" requested but not yet received
       this.otherPlayers = new Map(); // id -> mesh
       this.blockCache = null; // dim + Map key->Uint8Array
       this.currentDimension = "overworld";
@@ -151,12 +151,17 @@ import * as THREE from "../vendor/three.module.js";
 
     onChunk(data) {
       const k = `${data.cx}:${data.cz}`;
+      this.pendingChunks.delete(k); // no longer in flight once data arrives
       const arr = typeof data.data === "string"
         ? new Uint8Array(atob(data.data).split("").map((c) => c.charCodeAt(0)))
         : data.data;
       this.ensureCache().set(k, arr);
-      this.buildChunkMesh(data.cx, data.cz);
-      this.ensureChunkNeighbors(data.cx, data.cz);
+      try {
+        this.buildChunkMesh(data.cx, data.cz);
+        this.ensureChunkNeighbors(data.cx, data.cz);
+      } catch (e) {
+        console.error("buildChunkMesh failed", data.cx, data.cz, e);
+      }
     }
 
     ensureChunkNeighbors(cx, cz) {
@@ -167,12 +172,7 @@ import * as THREE from "../vendor/three.module.js";
     }
 
     onUnloadChunk(data) {
-      const k = `${data.cx}:${data.cz}`;
-      const mesh = this.chunkMeshes.get(k);
-      if (mesh) { this.scene.remove(mesh); mesh.geometry.dispose(); }
-      this.chunkMeshes.delete(k);
-      this.ensureCache().delete(k);
-      this.requested.delete(k);
+      this.unloadChunk(`${data.cx}:${data.cz}`);
     }
 
     onBlockUpdate(data) {
@@ -237,10 +237,11 @@ import * as THREE from "../vendor/three.module.js";
       if (mesher.isEmpty()) return;
 
       const geo = new THREE.BufferGeometry();
-      geo.setAttribute("position", new THREE.BufferAttribute(mesher.positions, 3));
-      geo.setAttribute("normal", new THREE.BufferAttribute(mesher.normals, 3));
-      geo.setAttribute("color", new THREE.BufferAttribute(mesher.colors, 3));
-      geo.setIndex(mesher.indices);
+      geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(mesher.positions), 3));
+      geo.setAttribute("normal", new THREE.BufferAttribute(new Float32Array(mesher.normals), 3));
+      geo.setAttribute("color", new THREE.BufferAttribute(new Float32Array(mesher.colors), 3));
+      const vertCount = mesher.positions.length / 3;
+      geo.setIndex(vertCount > 65535 ? new THREE.BufferAttribute(new Uint32Array(mesher.indices), 1) : new THREE.BufferAttribute(new Uint16Array(mesher.indices), 1));
       const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
 
       const mesh = new THREE.Mesh(geo, mat);
@@ -359,35 +360,51 @@ import * as THREE from "../vendor/three.module.js";
       return false;
     }
 
-    streamChunks() {
+    streamChunks(force = false) {
       if (!this.socket || !this.socket.connected) return;
       const dist = 4;
       const px = Math.floor(this.position.x / CHUNK);
       const pz = Math.floor(this.position.z / CHUNK);
+
+      // Compute the desired view area once; only chunks NOT already loaded
+      // and NOT already requested are requested (chunk-difference streaming).
       const want = new Set();
+      const toRequest = [];
       for (let dx = -dist; dx <= dist; dx++) {
         for (let dz = -dist; dz <= dist; dz++) {
           const cx = px + dx, cz = pz + dz;
-          want.add(`${cx}:${cz}`);
-          if (!this.requested.has(`${cx}:${cz}`)) {
-            if (!this.chunkMeshes.has(`${cx}:${cz}`)) {
-              this.requested.add(`${cx}:${cz}`);
-              this.socket.emit("loadChunks", { dimension: this.currentDimension, cx, cz, viewDistance: dist });
-            }
+          const ck = `${cx}:${cz}`;
+          want.add(ck);
+          if (this.chunkMeshes.has(ck)) continue;        // already rendered
+          if (this.pendingChunks.has(ck) && !force) continue; // in flight
+          if (!toRequest.some((c) => c.ck === ck)) {
+            toRequest.push({ ck, cx, cz });
           }
         }
       }
-      // unload far
-      if (this.chunkMeshes.size > 100) {
+
+      for (const { ck, cx, cz } of toRequest) {
+        this.pendingChunks.add(ck);
+        this.socket.emit("loadChunks", { dimension: this.currentDimension, cx, cz, viewDistance: dist });
+      }
+
+      // Unload chunks that are far outside the current view area. Only the
+      // client-side rendering data is dropped; the server keeps the persisted
+      // world intact (regardless of this socket event).
+      if (this.chunkMeshes.size > (2 * dist + 1) * (2 * dist + 1)) {
         for (const k of Array.from(this.chunkMeshes.keys())) {
           if (!want.has(k)) {
-            const [cx, cz] = k.split(":").map(Number);
-            this.socket.emit("unloadChunks", { cx, cz });
-            const mesh = this.chunkMeshes.get(k);
-            this.scene.remove(mesh); mesh.geometry.dispose(); this.chunkMeshes.delete(k);
+            this.unloadChunk(k);
           }
         }
       }
+    }
+
+    unloadChunk(k) {
+      const mesh = this.chunkMeshes.get(k);
+      if (mesh) { this.scene.remove(mesh); mesh.geometry.dispose(); mesh.material?.dispose?.(); this.chunkMeshes.delete(k); }
+      this.pendingChunks.delete(k);
+      this.ensureCache().delete(k);
     }
 
     // ---------- actions ----------
@@ -455,8 +472,8 @@ import * as THREE from "../vendor/three.module.js";
 
     resetDimension(dim) {
       this.currentDimension = dim;
+      this.pendingChunks.clear();
       this.ensureCache().clear();
-      this.requested.clear();
     }
 
     dispose() {
