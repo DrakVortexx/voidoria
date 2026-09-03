@@ -1,50 +1,45 @@
 const prisma = require("../db");
 
-const BIG = (n) => BigInt(n);
+const BIG = (n) => BigInt(Math.trunc(Number(n)));
 
-async function ensureBalance(playerId) {
-  let bal = await prisma.balance.findUnique({ where: { playerId } });
-  if (!bal) {
-    bal = await prisma.balance.create({ data: { playerId, amount: BIG(10000) } });
-  }
-  return bal;
+async function ensureProfile(playerId) {
+  // profile is guaranteed by auth, but guard anyway
+  const p = await prisma.playerProfile.findUnique({ where: { id: playerId } });
+  return p;
 }
 
 async function getBalance(playerId) {
-  const bal = await ensureBalance(playerId);
-  return bal.amount;
+  const p = await ensureProfile(playerId);
+  return p ? p.currency : 0n;
 }
 
 async function getBalanceNumber(playerId) {
-  const b = await getBalance(playerId);
-  return Number(b);
+  return Number(await getBalance(playerId));
 }
 
-// deduct exact amount; throws if insufficient. Uses optimistic DB update.
+// Deduct exactly `amount`; throws if insufficient. Uses a conditional update
+// to prevent concurrent overspend / double-spend.
 async function deduct(playerId, amount, { tx } = {}) {
   const c = tx || prisma;
   const amt = BIG(amount);
   if (amt <= 0) throw new Error("Invalid amount");
-  const updated = await c.balance.updateMany({
-    where: { playerId, amount: { gte: amt } },
-    data: { amount: { decrement: amt } },
+  const updated = await c.playerProfile.updateMany({
+    where: { id: playerId, currency: { gte: amt } },
+    data: { currency: { decrement: amt } },
   });
-  if (updated.count === 0) {
-    throw new Error("Insufficient funds");
-  }
+  if (updated.count === 0) throw new Error("Insufficient funds");
 }
 
 async function credit(playerId, amount, { tx } = {}) {
   const c = tx || prisma;
   const amt = BIG(amount);
-  if (amt <= 0) throw new Error("Invalid amount");
-  await c.balance.update({
-    where: { playerId },
-    data: { amount: { increment: amt } },
+  if (amt < 0) throw new Error("Invalid amount");
+  await c.playerProfile.update({
+    where: { id: playerId },
+    data: { currency: { increment: amt } },
   });
 }
 
-// Record a transaction row
 async function recordTransfer(senderId, receiverId, amount, type, reference, { tx } = {}) {
   const c = tx || prisma;
   await c.transaction.create({
@@ -58,60 +53,82 @@ async function recordTransfer(senderId, receiverId, amount, type, reference, { t
   });
 }
 
-// atomic transfer between two players
+// Atomic transfer between two players.
 async function transfer(senderId, receiverId, amount, type, reference) {
   const amt = BIG(amount);
   if (amt <= 0) throw new Error("Invalid amount");
   if (senderId === receiverId) throw new Error("Cannot transfer to yourself");
-
   return prisma.$transaction(async (tx) => {
-    await ensureBalance(senderId);
-    await ensureBalance(receiverId);
     await deduct(senderId, amt, { tx });
     await credit(receiverId, amt, { tx });
     await recordTransfer(senderId, receiverId, amt, type, reference, { tx });
-    return { sender: await getBalance(senderId), receiver: await getBalance(receiverId) };
+    return { sender: await getBalanceNumber(senderId), receiver: await getBalanceNumber(receiverId) };
   });
 }
 
-// pay from player to "void"/system (e.g. shop buy)
 async function paySystem(playerId, amount, type, reference) {
   const amt = BIG(amount);
   return prisma.$transaction(async (tx) => {
-    await ensureBalance(playerId);
     await deduct(playerId, amt, { tx });
     await recordTransfer(playerId, null, amt, type, reference, { tx });
   });
 }
 
-// credit player from system (e.g. shop sell)
 async function creditSystem(playerId, amount, type, reference) {
   const amt = BIG(amount);
   return prisma.$transaction(async (tx) => {
-    await ensureBalance(playerId);
     await credit(playerId, amt, { tx });
     await recordTransfer(null, playerId, amt, type, reference, { tx });
   });
 }
 
-async function baltop(limit = 10) {
-  const rows = await prisma.balance.findMany({
-    orderBy: { amount: "desc" },
-    take: limit,
-    include: { player: { select: { displayName: true } } },
+// -------- Net worth --------
+// Wealth = cash + marketable inventory (base value) + properties (value) +
+//          value stored in open sell orders + shop plot equity.
+// This must be conservative to avoid exploits (uses base market values, not
+// inflated sale prices).
+async function netWorthOf(playerId) {
+  const p = await ensureProfile(playerId);
+  const inventoryModule = require("./inventory");
+  const invWorth = await inventoryModule.inventoryWorth(playerId);
+  const propertyValue = await prisma.property.aggregate({
+    where: { ownerId: playerId },
+    _sum: { value: true },
   });
-  return rows.map((r) => ({ name: r.player.displayName, amount: Number(r.amount) }));
+  // Value of goods currently awaiting sale (quantity * price) is locked up.
+  let locked = 0;
+  const sells = await prisma.marketOrder.findMany({
+    where: { playerId, side: "SELL", status: { in: ["OPEN", "PARTIAL"] } },
+    select: { quantity: true, filled: true, unitPrice: true },
+  });
+  for (const s of sells) locked += (s.quantity - s.filled) * Number(s.unitPrice);
+
+  return {
+    cash: p.currency,
+    inventoryWorth: BigInt(Math.trunc(invWorth)),
+    propertyWorth: BigInt(propertyValue._sum?.value || 0),
+    lockedMarketWorth: BigInt(locked),
+    netWorth: p.currency + BigInt(Math.trunc(invWorth)) + BigInt(propertyValue._sum?.value || 0) + BigInt(locked),
+  };
+}
+
+// Richest players by net worth (cash + inventory + property).
+async function richList(limit = 10) {
+  const profiles = await prisma.playerProfile.findMany({
+    select: { id: true, displayName: true, currency: true },
+    take: 200,
+  });
+  const result = [];
+  for (const p of profiles) {
+    const nw = await netWorthOf(p.id).catch(() => null);
+    if (!nw) continue;
+    result.push({ id: p.id, name: p.displayName, cash: p.currency, netWorth: nw.netWorth });
+  }
+  result.sort((a, b) => (a.netWorth < b.netWorth ? 1 : -1));
+  return result.slice(0, limit).map((r, i) => ({ rank: i + 1, ...r, netWorth: Number(r.netWorth) }));
 }
 
 module.exports = {
-  ensureBalance,
-  getBalance,
-  getBalanceNumber,
-  deduct,
-  credit,
-  transfer,
-  paySystem,
-  creditSystem,
-  recordTransfer,
-  baltop,
+  getBalance, getBalanceNumber, deduct, credit, transfer,
+  paySystem, creditSystem, recordTransfer, netWorthOf, richList,
 };

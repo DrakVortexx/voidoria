@@ -7,19 +7,21 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ============================================================================
+// AUTHENTICATION CORE (KEEP — do not remove)
+// ============================================================================
+
 model User {
-  id           String    @id @default(uuid())
-  username     String    @unique
-  passwordHash String    @map("password_hash")
-  createdAt    DateTime  @default(now()) @map("created_at")
+  id           String   @id @default(uuid())
+  username     String   @unique
+  passwordHash String   @map("password_hash")
+  createdAt    DateTime @default(now()) @map("created_at")
   lastLogin    DateTime? @map("last_login")
   sessions     Session[]
   profile      PlayerProfile?
-  friends     Friendship[]       @relation("FriendA")
-  friendsOf    Friendship[]       @relation("FriendB")
   settings     PlayerSetting?
-  stasisChambers StasisChamber[]
-  cooldowns    Cooldown[]
+  friendships  Friendship[]       @relation("FriendA")
+  friendsOf    Friendship[]       @relation("FriendB")
 
   @@map("users")
 }
@@ -38,142 +40,57 @@ model Session {
 }
 
 model PlayerProfile {
-  id         String   @id @default(uuid())
-  userId     String   @unique @map("user_id")
-  displayName String  @map("display_name")
-  appearance Json     @default("{}") // hair/face/clothing/colors/accessories
-  posX       Float    @default(8) @map("pos_x")
-  posY       Float    @default(70) @map("pos_y")
-  posZ       Float    @default(8) @map("pos_z")
-  rotationY  Float    @default(0) @map("rotation_y")
-  dimension  String   @default("overworld")
-  health     Float    @default(20) @map("health")
-  maxHealth  Float    @default(20) @map("max_health")
-  hunger     Float    @default(20) @map("hunger")
-  xp         Float    @default(0) @map("xp")
-  level      Int      @default(1)
-  kills      Int      @default(0)
-  deaths     Int      @default(0)
-  createdAt  DateTime @default(now()) @map("created_at")
-  updatedAt  DateTime @updatedAt @map("updated_at")
-  lastSeenAt DateTime? @map("last_seen_at")
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  inventory  InventorySlot[]
-  balances   Balance[]
-  sentTransactions   Transaction[] @relation("TransSender")
-  receivedTransactions Transaction[] @relation("TransReceiver")
-  auctionsSeller   AuctionListing[] @relation("AuctionSeller")
-  auctionsBuyer    AuctionListing[] @relation("AuctionBuyer")
-  shopTransactions ShopTransaction[]
-  homes      PlayerHome[]
+  id          String   @id @default(uuid())
+  userId      String   @unique @map("user_id")
+  displayName String   @map("display_name")
+  appearance  Json     @default("{}") // hair/face/clothing/colors/accessories
+  posX        Float    @default(0) @map("pos_x")
+  posY        Float    @default(0) @map("pos_y")
+  health      Float    @default(100) @map("health")
+  currency    BigInt   @default(0)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  lastSeenAt  DateTime? @map("last_seen_at")
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  inventory   InventoryStack[]
+  transactionsSent   Transaction[] @relation("TransSender")
+  transactionsReceived Transaction[] @relation("TransReceiver")
+  marketOrders MarketOrder[]
+  shop         Shop?
+  auctions     Auction[] @relation("AuctionSeller")
+  auctionsBid  Auction[] @relation("AuctionBidder")
+  auctionBids  AuctionBid[] @relation("AuctionBidder")
   bountiesCreated Bounty[] @relation("BountyCreator")
   bountiesTargeted Bounty[] @relation("BountyTarget")
-  pendingSends    PendingTeleport[] @relation("TpSender")
-  pendingReceives PendingTeleport[] @relation("TpReceiver")
+  facilities   ProductionFacility[]
+  crates       Crate[]
+  businesses   BusinessMember[]
+  ownedBusinesses Business[] @relation("BusinessOwner")
+  buildings    Building[]
+  properties   Property[]
+  productionJobs ProductionJob[]
+  transports   TransportContract[]
+  deliveries   DeliveryJob[]
+  stats        PlayerStat?
+  offersSent    TradeOffer[] @relation("TradeOfferSender")
+  offersReceived TradeOffer[] @relation("TradeOfferReceiver")
+  tradesA      Trade[] @relation("TradeA")
+  tradesB      Trade[] @relation("TradeB")
 
   @@map("player_profiles")
 }
 
-model PlayerItem {
-  id        String   @id @default(uuid())
-  itemType  String   @map("item_type") // block or item id
-  durability Float   @default(0) @map("durability")
-  metadata  Json     @default("{}")
+model PlayerSetting {
+  id            String  @id @default(uuid())
+  userId        String  @unique @map("user_id")
+  chatVisible   Boolean @default(true) @map("chat_visible")
+  chatNotifications Boolean @default(true) @map("chat_notifications")
+  notifications Boolean @default(true)
+  pvpOptOut     Boolean @default(false) @map("pvp_opt_out")
+  user          User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@map("player_items")
-}
-
-model InventorySlot {
-  id       String   @id @default(uuid())
-  playerId String   @map("player_id")
-  slot     Int
-  itemType String   @map("item_type")
-  amount   Int      @default(1)
-  durability Float  @default(0) @map("durability")
-  metadata Json     @default("{}")
-  player   PlayerProfile @relation(fields: [playerId], references: [id], onDelete: Cascade)
-
-  @@unique([playerId, slot])
-  @@index([playerId])
-  @@map("inventory_slots")
-}
-
-model Balance {
-  id       String  @id @default(uuid())
-  playerId String  @unique @map("player_id")
-  amount   BigInt  @default(0)
-  player   PlayerProfile @relation(fields: [playerId], references: [id], onDelete: Cascade)
-
-  @@map("balances")
-}
-
-model Transaction {
-  id          String   @id @default(uuid())
-  senderId    String?  @map("sender_id")
-  receiverId  String?  @map("receiver_id")
-  amount      BigInt   @map("amount")
-  type        String   // SHOP_PURCHASE, SHOP_SALE, AUCTION_PURCHASE, PLAYER_PAYMENT, BOUNTY_REWARD, RTP, STARTING, ADMIN, PVP, REFUND
-  reference   String?  @map("reference_id")
-  createdAt   DateTime @default(now()) @map("created_at")
-  sender      PlayerProfile? @relation("TransSender", fields: [senderId], references: [id], onDelete: SetNull)
-  receiver    PlayerProfile? @relation("TransReceiver", fields: [receiverId], references: [id], onDelete: SetNull)
-
-  @@index([senderId])
-  @@index([receiverId])
-  @@map("transactions")
-}
-
-model AuctionListing {
-  id        String   @id @default(uuid())
-  sellerId  String   @map("seller_id")
-  itemType  String   @map("item_id")
-  quantity  Int      @default(1)
-  price     BigInt   @map("price")
-  status    String   @default("ACTIVE") // ACTIVE, SOLD, CANCELLED, EXPIRED
-  createdAt DateTime @default(now()) @map("created_at")
-  expiresAt DateTime @map("expires_at")
-  soldAt    DateTime? @map("sold_at")
-  buyerId   String?  @map("buyer_id")
-  metadata  Json     @default("{}")
-  seller    PlayerProfile @relation("AuctionSeller", fields: [sellerId], references: [id], onDelete: Cascade)
-  buyer     PlayerProfile? @relation("AuctionBuyer", fields: [buyerId], references: [id], onDelete: SetNull)
-
-  @@index([sellerId])
-  @@index([status])
-  @@index([expiresAt])
-  @@map("auction_listings")
-}
-
-model PlayerHome {
-  id        String   @id @default(uuid())
-  playerId  String   @map("player_id")
-  name      String   @default("home")
-  x         Float    @map("x")
-  y         Float    @map("y")
-  z         Float    @map("z")
-  dimension String   @default("overworld")
-  createdAt DateTime @default(now()) @map("created_at")
-  profile   PlayerProfile @relation(fields: [playerId], references: [id], onDelete: Cascade)
-
-  @@unique([playerId, name])
-  @@map("player_homes")
-}
-
-model Bounty {
-  id        String   @id @default(uuid())
-  creatorId String   @map("creator_id")
-  targetId  String   @map("target_id")
-  amount    BigInt   @map("amount")
-  status    String   @default("ACTIVE") // ACTIVE, CLAIMED, CANCELLED, EXPIRED
-  createdAt DateTime @default(now()) @map("created_at")
-  expiresAt DateTime? @map("expires_at")
-  claimedBy String?  @map("claimed_by")
-  creator   PlayerProfile @relation("BountyCreator", fields: [creatorId], references: [id], onDelete: Cascade)
-  target    PlayerProfile @relation("BountyTarget", fields: [targetId], references: [id], onDelete: Cascade)
-
-  @@index([targetId])
-  @@index([status])
-  @@map("bounties")
+  @@map("player_settings")
 }
 
 model Friendship {
@@ -191,108 +108,430 @@ model Friendship {
   @@map("friendships")
 }
 
-model PlayerSetting {
-  id              String  @id @default(uuid())
-  userId          String  @unique @map("user_id")
-  allowTpa        Boolean @default(true) @map("allow_tpa")
-  allowTpaHere    Boolean @default(true) @map("allow_tpa_here")
-  autoAcceptTpa   Boolean @default(false) @map("auto_accept_tpa")
-  autoAcceptTpaHere Boolean @default(false) @map("auto_accept_tpa_here")
-  chatVisible     Boolean @default(true) @map("chat_visible")
-  chatNotifications Boolean @default(true) @map("chat_notifications")
-  showScoreboard  Boolean @default(true) @map("show_scoreboard")
-  notifications   Boolean @default(true)
-  user            User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+// ============================================================================
+// ITEMS & INVENTORY
+// Item definitions live in code (server/game/items.js). Stacks reference a
+// definition id. Individual instances (quality/durability/creator) are stored
+// as stacks with metadata to keep the model simple and atomic.
+// ============================================================================
 
-  @@map("player_settings")
-}
-
-model WorldChunk {
-  dimension    String   @map("dimension")
-  cx           Int      @map("chunk_x")
-  cz           Int      @map("chunk_z")
-  worldVersion Int      @default(1) @map("world_version")
-  generated    Boolean  @default(false)
-  terrain      String   @default("") // compressed base terrain
-  modifications String  @default("") // compressed [idx, block] list
-  updatedAt    DateTime @updatedAt @map("updated_at")
-
-  @@id([dimension, cx, cz])
-  @@index([dimension, cx, cz])
-  @@map("world_chunks")
-}
-
-model ShopItem {
-  id          String   @id
-  itemId      String   @unique @map("item_id")
-  displayName String   @map("display_name")
-  category    String   @default("misc")
-  buyPrice    BigInt   @map("buy_price")   // -1 = not buyable
-  sellPrice   BigInt   @map("sell_price")  // -1 = not sellable
-  enabled     Boolean  @default(true)
-  stock       Int?     @map("stock")       // null = unlimited
-  metadata    Json     @default("{}")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
-
-  @@index([category])
-  @@map("shop_items")
-}
-
-model ShopTransaction {
+model InventoryStack {
   id         String   @id @default(uuid())
   playerId   String   @map("player_id")
-  itemId     String   @map("item_id")
-  quantity   Int      @map("quantity")
-  unitPrice  BigInt   @map("unit_price")
-  totalPrice BigInt   @map("total_price")
-  type       String   // BUY or SELL
-  createdAt  DateTime @default(now()) @map("created_at")
-  profile    PlayerProfile @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  itemDef    String   @map("item_def")
+  amount     Int      @default(1)
+  quality    Float    @default(1) @map("quality")      // crafted quality multiplier
+  durability Float    @default(1) @map("durability")    // remaining durability 0..1
+  metadata   Json     @default("{}")                    // creatorName, properties, etc.
+  updatedAt  DateTime @updatedAt @map("updated_at")
+  player     PlayerProfile @relation(fields: [playerId], references: [id], onDelete: Cascade)
 
   @@index([playerId])
-  @@map("shop_transactions")
+  @@index([playerId, itemDef])
+  @@map("inventory_stacks")
 }
 
-model PendingTeleport {
-  id          String   @id @default(uuid())
-  senderId    String   @map("sender_id")
-  receiverId  String   @map("receiver_id")
-  kind        String   // "tpa", "tpahere"
-  status      String   @default("PENDING")
-  createdAt   DateTime @default(now()) @map("created_at")
-  expiresAt   DateTime @map("expires_at")
-  sender      PlayerProfile @relation("TpSender", fields: [senderId], references: [id], onDelete: Cascade)
-  receiver    PlayerProfile @relation("TpReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
+// ============================================================================
+// ECONOMY
+// ============================================================================
 
+model Transaction {
+  id         String   @id @default(uuid())
+  senderId   String?  @map("sender_id")
+  receiverId String?  @map("receiver_id")
+  amount     BigInt
+  type       String   // MARKET_BUY, MARKET_SELL, SHOP_PURCHASE, AUCTION, TRADE, PLAYER_PAYMENT, COLLECT, PRODUCTION, ADMIN, BOUNTY, REFUND, STARTING
+  reference  String?  @map("reference_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+  sender     PlayerProfile? @relation("TransSender", fields: [senderId], references: [id], onDelete: SetNull)
+  receiver   PlayerProfile? @relation("TransReceiver", fields: [receiverId], references: [id], onDelete: SetNull)
+
+  @@index([senderId])
   @@index([receiverId])
-  @@index([status])
-  @@map("pending_teleports")
+  @@index([createdAt])
+  @@map("transactions")
 }
 
-model StasisChamber {
+model MarketOrder {
+  id        String   @id @default(uuid())
+  playerId  String   @map("player_id")
+  itemDef   String   @map("item_def")
+  side      String   // BUY or SELL
+  quantity  Int
+  filled    Int      @default(0)
+  unitPrice BigInt   @map("unit_price")   // limit price
+  status    String   @default("OPEN")     // OPEN, PARTIAL, CLOSED, CANCELLED
+  createdAt DateTime @default(now()) @map("created_at")
+  player    PlayerProfile @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@index([itemDef, side, status])
+  @@index([playerId])
+  @@map("market_orders")
+}
+
+model PricePoint {
+  id        String   @id @default(uuid())
+  itemDef   String   @map("item_def")
+  price     BigInt
+  volume    Int      @default(0)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([itemDef, createdAt])
+  @@map("price_points")
+}
+
+// ============================================================================
+// SHOPS & SHOP PLOTS
+// ============================================================================
+
+model ShopPlot {
   id          String   @id @default(uuid())
-  ownerId     String   @map("owner_id")
-  name        String   @default("Chamber")
+  plotKey     String   @unique @map("plot_key")   // e.g. "central-01"
+  regionKey   String   @map("region_key")
+  name        String
+  sizeW       Int      @map("size_w")
+  sizeH       Int      @map("size_h")
+  baseValue   BigInt   @map("base_value")          // purchase price
+  commercialPremium Float @default(1) @map("commercial_premium")
   x           Float    @map("x")
   y           Float    @map("y")
-  z           Float    @map("z")
-  dimension   String   @default("overworld")
-  active      Boolean  @default(true)
-  lastPullAt  DateTime? @map("last_pull_at")
-  createdAt   DateTime @default(now()) @map("created_at")
-  owner       User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  // Plot is predefined and immutable (cannot move/resize boundary)
+  shop        Shop?
 
-  @@map("stasis_chambers")
+  @@map("shop_plots")
 }
 
-model Cooldown {
-  id      String   @id @default(uuid())
-  userId  String   @map("user_id")
-  kind    String   // "rtp", "stasis_pull", "spawn"
-  endsAt  DateTime @map("ends_at")
-  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+model Shop {
+  id          String   @id @default(uuid())
+  playerId    String?  @unique @map("player_id")   // owner (nullable = unowned/factionless)
+  plotId      String   @unique @map("plot_id")
+  name        String   @default("Untitled Shop")
+  sign        String   @default("")                // displayed sign text
+  shopkeeper  String   @default("default")         // shopkeeper appearance
+  interior    Json     @default("{}")              // shelves/displays/decorations/lighting
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  player      PlayerProfile? @relation(fields: [playerId], references: [id], onDelete: SetNull)
+  plot        ShopPlot @relation(fields: [plotId], references: [id], onDelete: Cascade)
+  listings    ShopListing[]
 
-  @@unique([userId, kind])
-  @@map("cooldowns")
+  @@map("shops")
+}
+
+model ShopListing {
+  id        String   @id @default(uuid())
+  shopId    String   @map("shop_id")
+  itemDef   String   @map("item_def")
+  price     BigInt
+  quantity  Int
+  sold      Int      @default(0)
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+  shop      Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId])
+  @@map("shop_listings")
+}
+
+// ============================================================================
+// AUCTION HOUSE
+// ============================================================================
+
+model Auction {
+  id         String   @id @default(uuid())
+  sellerId   String   @map("seller_id")
+  itemDef    String   @map("item_def")
+  quantity   Int      @default(1)
+  quality    Float    @default(1)
+  startPrice BigInt   @map("start_price")
+  buyoutPrice BigInt? @map("buyout_price")
+  currentBid BigInt   @default(0)
+  bidderId   String?  @map("bidder_id")
+  status     String   @default("ACTIVE") // ACTIVE, SOLD, EXPIRED, CANCELLED
+  metadata   Json     @default("{}")     // creator, properties, etc.
+  createdAt  DateTime @default(now()) @map("created_at")
+  expiresAt  DateTime @map("expires_at")
+  soldAt     DateTime? @map("sold_at")
+  seller     PlayerProfile @relation("AuctionSeller", fields: [sellerId], references: [id], onDelete: Cascade)
+  bidder     PlayerProfile? @relation("AuctionBidder", fields: [bidderId], references: [id], onDelete: SetNull)
+  bids       AuctionBid[]
+
+  @@index([status])
+  @@index([expiresAt])
+  @@index([sellerId])
+  @@map("auctions")
+}
+
+model AuctionBid {
+  id        String   @id @default(uuid())
+  auctionId String   @map("auction_id")
+  bidderId  String   @map("bidder_id")
+  amount    BigInt
+  createdAt DateTime @default(now()) @map("created_at")
+  auction   Auction  @relation(fields: [auctionId], references: [id], onDelete: Cascade)
+  bidder    PlayerProfile @relation("AuctionBidder", fields: [bidderId], references: [id], onDelete: Cascade)
+
+  @@index([auctionId])
+  @@map("auction_bids")
+}
+
+// ============================================================================
+// BUSINESSES & PRODUCTION
+// ============================================================================
+
+model Business {
+  id          String   @id @default(uuid())
+  ownerId     String?  @map("owner_id")
+  name        String
+  businessType String  @map("business_type") // MINING, LUMBER, MANUFACTURING, CONSTRUCTION, TRANSPORT, TRADING, RETAIL, AGRICULTURE, LOGISTICS
+  createdAt   DateTime @default(now()) @map("created_at")
+  owner       PlayerProfile? @relation("BusinessOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  members     BusinessMember[]
+  facilities  ProductionFacility[]
+
+  @@map("businesses")
+}
+
+model BusinessMember {
+  id         String   @id @default(uuid())
+  businessId String   @map("business_id")
+  playerId   String   @map("player_id")
+  role       String   @default("MEMBER") // OWNER, MANAGER, MEMBER
+  createdAt  DateTime @default(now()) @map("created_at")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  player     PlayerProfile @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, playerId])
+  @@map("business_members")
+}
+
+model ProductionFacility {
+  id         String   @id @default(uuid())
+  businessId String?  @map("business_id")
+  ownerId    String?  @map("owner_id")       // solo players can own facilities too
+  kind       String   // MILL, FACTORY, PROCESSING_PLANT, WAREHOUSE, FARM, WORKSHOP
+  name       String
+  x          Float    @map("x")
+  y          Float    @map("y")
+  capacity   Int      @default(10)           // concurrent jobs
+  createdAt  DateTime @default(now()) @map("created_at")
+  business   Business? @relation(fields: [businessId], references: [id], onDelete: SetNull)
+  owner      PlayerProfile? @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  jobs       ProductionJob[]
+
+  @@map("production_facilities")
+}
+
+model ProductionJob {
+  id          String   @id @default(uuid())
+  facilityId  String   @map("facility_id")
+  playerId    String   @map("player_id")
+  recipeKey   String   @map("recipe_key")
+  produced    Int      @default(0)
+  target      Int
+  startedAt   DateTime @default(now()) @map("started_at")
+  finishedAt  DateTime? @map("finished_at")
+  status      String   @default("RUNNING") // RUNNING, DONE, CANCELLED, COLLECTED
+  facility    ProductionFacility @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+  player      PlayerProfile @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@index([playerId, status])
+  @@map("production_jobs")
+}
+
+// ============================================================================
+// BUILDINGS & PROPERTY
+// ============================================================================
+
+model Property {
+  id        String   @id @default(uuid())
+  ownerId   String?  @map("owner_id")
+  regionKey String   @map("region_key")
+  kind      String   // HOME, SHOP, WAREHOUSE, FACTORY, FARM, WORKSHOP, COMMERCIAL
+  name      String   @default("Property")
+  x         Float    @map("x")
+  y         Float    @map("y")
+  sizeW     Int      @default(2)
+  sizeH     Int      @default(2)
+  value     BigInt   @default(0)
+  owner     PlayerProfile? @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  buildings Building[]
+
+  @@map("properties")
+}
+
+model Building {
+  id        String   @id @default(uuid())
+  ownerId   String?  @map("owner_id")
+  propertyId String? @map("property_id")
+  kind      String   // HOME, SHOP, WAREHOUSE, FACTORY, FARM, WORKSHOP, ROAD, MARKET
+  name      String   @default("Building")
+  x         Float    @map("x")
+  y         Float    @map("y")
+  data      Json     @default("{}")
+  owner     PlayerProfile? @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  property  Property? @relation(fields: [propertyId], references: [id], onDelete: SetNull)
+
+  @@index([kind])
+  @@map("buildings")
+}
+
+// ============================================================================
+// TRANSPORT / LOGISTICS
+// ============================================================================
+
+model TransportContract {
+  id         String   @id @default(uuid())
+  playerId   String   @map("player_id")      // carrier
+  fromRegion String   @map("from_region")
+  toRegion   String   @map("to_region")
+  itemDef    String   @map("item_def")
+  quantity   Int
+  reward     BigInt
+  status     String   @default("ACCEPTED")   // ACCEPTED, DELIVERED, CANCELLED
+  createdAt  DateTime @default(now()) @map("created_at")
+  player     PlayerProfile @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@map("transport_contracts")
+}
+
+model DeliveryJob {
+  id         String   @id @default(uuid())
+  playerId   String   @map("player_id")
+  fromX      Float    @map("from_x")
+  fromY      Float    @map("from_y")
+  toX        Float    @map("to_x")
+  toY        Float    @map("to_y")
+  reward     BigInt
+  status     String   @default("ACTIVE")     // ACTIVE, DELIVERED, CANCELLED
+  createdAt  DateTime @default(now()) @map("created_at")
+  player     PlayerProfile @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@map("delivery_jobs")
+}
+
+// ============================================================================
+// SOCIAL / TRADING
+// ============================================================================
+
+model TradeOffer {
+  id        String   @id @default(uuid())
+  fromId    String   @map("from_id")
+  toId      String   @map("to_id")
+  offer     Json     @default("{}")          // structured offer (items + currency)
+  request   Json     @default("{}")
+  status    String   @default("PENDING")     // PENDING, ACCEPTED, DECLINED, CANCELLED
+  createdAt DateTime @default(now()) @map("created_at")
+  sender    PlayerProfile @relation("TradeOfferSender", fields: [fromId], references: [id], onDelete: Cascade)
+  receiver  PlayerProfile @relation("TradeOfferReceiver", fields: [toId], references: [id], onDelete: Cascade)
+
+  @@index([toId, status])
+  @@map("trade_offers")
+}
+
+model Trade {
+  id         String   @id @default(uuid())
+  playerAId  String   @map("player_a_id")
+  playerBId  String   @map("player_b_id")
+  offerA     Json     @default("{}")
+  offerB     Json     @default("{}")
+  createdAt  DateTime @default(now()) @map("created_at")
+  playerA    PlayerProfile @relation("TradeA", fields: [playerAId], references: [id], onDelete: Cascade)
+  playerB    PlayerProfile @relation("TradeB", fields: [playerBId], references: [id], onDelete: Cascade)
+
+  @@map("trades")
+}
+
+// ============================================================================
+// PVP
+// ============================================================================
+
+model Bounty {
+  id        String   @id @default(uuid())
+  creatorId String   @map("creator_id")
+  targetId  String   @map("target_id")
+  amount    BigInt
+  status    String   @default("ACTIVE") // ACTIVE, CLAIMED, CANCELLED, EXPIRED
+  createdAt DateTime @default(now()) @map("created_at")
+  expiresAt DateTime? @map("expires_at")
+  claimedBy String?  @map("claimed_by")
+  creator   PlayerProfile @relation("BountyCreator", fields: [creatorId], references: [id], onDelete: Cascade)
+  target    PlayerProfile @relation("BountyTarget", fields: [targetId], references: [id], onDelete: Cascade)
+
+  @@index([targetId])
+  @@index([status])
+  @@map("bounties")
+}
+
+// ============================================================================
+// STATS & LEADERBOARDS / CRATES
+// ============================================================================
+
+model PlayerStat {
+  id             String @id @default(uuid())
+  playerId       String @unique @map("player_id")
+  level          Int    @default(1)
+  xp             Int    @default(0)
+  kills          Int    @default(0)
+  deaths         Int    @default(0)
+  pvpRating      Int    @default(1000)
+  itemsProduced  Int    @default(0) @map("items_produced")
+  itemsSold      Int    @default(0) @map("items_sold")
+  itemsBought    Int    @default(0) @map("items_bought")
+  tradesCompleted Int   @default(0) @map("trades_completed")
+  distanceWalked Float  @default(0) @map("distance_walked")
+  nodesGathered  Int    @default(0) @map("nodes_gathered")
+  auctionsWon    Int    @default(0) @map("auctions_won")
+  buildingsBuilt Int    @default(0) @map("buildings_built")
+  cratesOpened   Int    @default(0) @map("crates_opened")
+  player         PlayerProfile @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@map("player_stats")
+}
+
+model Crate {
+  id        String   @id @default(uuid())
+  playerId  String?  @map("player_id")
+  kind      String   // COMMON, RARE, EPIC, LEGENDARY
+  source    String   // EVENT, ACHIEVEMENT, PVP, EXPLORATION, MILESTONE
+  status    String   @default("UNOPENED")
+  createdAt DateTime @default(now()) @map("created_at")
+  player    PlayerProfile? @relation(fields: [playerId], references: [id], onDelete: SetNull)
+
+  @@index([playerId, status])
+  @@map("crates")
+}
+
+// ============================================================================
+// WORLD / REGIONS / RESOURCE NODES
+// ============================================================================
+
+model WorldRegion {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  name      String
+  kind      String   // CITY, TOWN, WILDERNESS, FOREST, MOUNTAIN, LAKE, RIVER, RESOURCE, AGRI, INDUSTRIAL, COMMERCIAL
+  x         Float    @map("x")
+  y         Float    @map("y")
+  radius    Float    @map("radius")
+  data      Json     @default("{}")
+
+  @@index([kind])
+  @@map("world_regions")
+}
+
+model ResourceNode {
+  id        String   @id @default(uuid())
+  regionKey String   @map("region_key")
+  itemDef   String   @map("item_def")
+  x         Float    @map("x")
+  y         Float    @map("y")
+  amount    Int      @default(100)     // remaining harvestable amount
+  maxAmount Int      @default(100) @map("max_amount")
+  respawnAt DateTime? @map("respawn_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([regionKey])
+  @@index([itemDef])
+  @@map("resource_nodes")
 }

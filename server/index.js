@@ -4,19 +4,16 @@ const cookieParser = require("cookie-parser");
 const path = require("path");
 const { execSync } = require("child_process");
 const { securityMiddleware } = require("./middleware/security");
-const { startup, seedCatalogAndShop } = require("../prisma/startup");
-const { WorldEngine } = require("./world/worldEngine");
+const { startup } = require("../prisma/startup");
 const { setupSockets } = require("./sockets/gameSockets");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-
 const WORLD_SEED = Number(process.env.WORLD_SEED) || 20260831;
-const world = new WorldEngine({ seed: WORLD_SEED });
 
 securityMiddleware(app);
 
-app.use(express.json({ limit: "200kb" }));
+app.use(express.json({ limit: "1mb" }));
 app.use(cookieParser());
 
 app.set("trust proxy", 1);
@@ -34,23 +31,31 @@ app.get("/api/health", (req, res) => {
 });
 
 app.get("/api/meta", (req, res) => {
+  const { WORLD_BOUNDS } = require("./game/regions");
   res.json({
     name: "Voidoria",
-    version: "1.0.0",
+    version: "1.1.0",
     seed: WORLD_SEED,
-    worldBorder: 5000,
-    dimensions: ["overworld", "void"],
+    world: WORLD_BOUNDS,
   });
 });
 
+// ---- Game routes (all mounted under /api) ----
 app.use("/api/auth", require("./routes/auth"));
-app.use("/api/player", require("./routes/player"));
-app.use("/api/economy", require("./routes/economy"));
-app.use("/api/shop", require("./routes/shop"));
-app.use("/api/ah", require("./routes/auction"));
-app.use("/api/teleport", require("./routes/teleport"));
-app.use("/api/stasis", require("./routes/stasis"));
 app.use("/api/world", require("./routes/world"));
+app.use("/api/profile", require("./routes/profile"));
+app.use("/api/economy", require("./routes/economy"));
+app.use("/api/market", require("./routes/market"));
+app.use("/api/shop", require("./routes/shop"));
+app.use("/api/auction", require("./routes/auction"));
+app.use("/api/business", require("./routes/business"));
+app.use("/api/production", require("./routes/production"));
+app.use("/api/building", require("./routes/building"));
+app.use("/api/transport", require("./routes/transport"));
+app.use("/api/pvp", require("./routes/pvp"));
+app.use("/api/social", require("./routes/social"));
+app.use("/api/leaderboards", require("./routes/leaderboards"));
+app.use("/api/crates", require("./routes/crates"));
 app.use("/api/admin", require("./routes/admin"));
 
 app.get("*", (req, res) => {
@@ -72,8 +77,6 @@ app.use((err, req, res, next) => {
 });
 
 async function startupBackground() {
-  // Ensure the Prisma client is generated against the current schema (self-healing).
-  // This guards against a stale client when only `npm install` runs (e.g. Render).
   try {
     execSync("npx prisma generate", { stdio: "ignore" });
   } catch (err) {
@@ -81,9 +84,6 @@ async function startupBackground() {
   }
 
   const autoPush = process.env.AUTO_PUSH_SCHEMA !== "false";
-
-  // On first deploy with AUTO_PUSH_SCHEMA=true, sync the schema so tables exist
-  // and the startup seed can populate shop catalog, transactions, and admin.
   if (autoPush) {
     try {
       console.log("Syncing database schema...");
@@ -100,32 +100,23 @@ async function startupBackground() {
 
 function main() {
   const server = http.createServer(app);
-  const { io, gs } = setupSockets(server, world);
-  global.__gameServer = gs;
-  app.locals.world = world;
-  app.locals.gameServer = gs;
+  const { io } = setupSockets(server);
+  app.locals.world = { seed: WORLD_SEED };
+  app.locals.gameServer = { io };
 
-  // convenience export for teleport route usage checks
-  io.on("connection", () => {});
-
-  // Bind immediately so the platform health check sees an open port while the
-  // schema sync + seed run in the background.
   server.listen(PORT, () => {
     console.log(`Voidoria server listening on port ${PORT}`);
   });
 
-  // DB schema sync + shop/admin seed happen in the background so startup does
-  // not block port binding (avoids Render "Timed Out" during slow first boot).
   startupBackground().catch((err) => {
     console.error("Startup/sync failed:", err);
     process.exitCode = 1;
   });
 
-  // graceful shutdown: persist dirty chunks
-  process.on("SIGINT", async () => {
-    console.log("Saving world...");
-    await world.saveAll().catch((e) => console.error(e));
-    world.dispose?.();
+  process.on("SIGINT", () => {
+    process.exit(0);
+  });
+  process.on("SIGTERM", () => {
     process.exit(0);
   });
 }

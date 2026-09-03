@@ -17,13 +17,11 @@ function publicUser(user) {
 }
 
 const STARTER_ITEMS = [
-  ["block:planks", 32],
-  ["block:cobblestone", 32],
-  ["item:stone_pickaxe", 1],
-  ["item:stone_axe", 1],
-  ["item:stone_sword", 1],
-  ["item:bread", 8],
-  ["item:coal", 8],
+  ["stone_pickaxe", 1],
+  ["axe", 1],
+  ["wood", 20],
+  ["stone", 20],
+  ["berries", 10],
 ];
 
 async function finalizeLogin(res, user) {
@@ -76,7 +74,7 @@ router.post("/register", validateBody(["username", "password", "confirmPassword"
           create: {
             displayName: username,
             appearance: defaultAppearance(),
-            posX: 8.5, posY: 70, posZ: 8.5, dimension: "overworld",
+            posX: 0, posY: 0,
           },
         },
         settings: { create: {} },
@@ -84,12 +82,9 @@ router.post("/register", validateBody(["username", "password", "confirmPassword"
       include: { profile: true, settings: true },
     });
 
-    await prisma.balance.create({ data: { playerId: user.profile.id, amount: BigInt(10000) } });
-
-    // starter inventory
-    for (const [itemType, amount] of STARTER_ITEMS) {
-      await addToInventory(user.profile.id, itemType, amount);
-    }
+    // starter funds, inventory, stats + spawn (server-authoritative)
+    const { initializePlayer } = require("../services/profile");
+    await initializePlayer(user.profile.id);
 
     await finalizeLogin(res, user);
 
@@ -191,11 +186,6 @@ router.post("/change-password", requireAuthLocal, validateBody(["currentPassword
     res.status(500).json({ error: "Failed to change password" });
   }
 });
-
-async function addToInventory(playerId, itemType, amount) {
-  const { addItem } = require("../services/inventory");
-  return addItem(playerId, itemType, amount);
-}
 
 function defaultAppearance() {
   return {

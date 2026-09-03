@@ -1,91 +1,68 @@
 # VOIDORIA
 
-**Voidoria** is an original multiplayer voxel sandbox survival & economy game. It is *not* affiliated with Minecraft or any other game. Build bases anywhere, mine resources, trade in a server-authoritative economy, place bounties, and brave **The Void** — a separate dimension guarded by Void Totems and Stasis Chambers.
+**Voidoria** is an open-world multiplayer **economy MMO**. Explore a persistent 2D top-down world, gather raw resources, run production chains, trade on a live global market, and build your empire through shops, auctions, businesses, and property. It is an original game — not affiliated with any existing title.
 
 ---
 
 ## Tech Stack
 
-- **Backend:** Node.js + Express (REST) + Socket.IO (real-time)
+- **Backend:** Node.js + Express (REST) + Socket.IO (real-time presence & chat)
 - **Database:** PostgreSQL on Neon (via Prisma ORM)
-- **Client:** Three.js voxel renderer (procedural chunk meshing)
+- **Client:** 2D top-down Canvas renderer (no voxel engine)
 - **Auth:** bcrypt password hashing + database-backed sessions (httpOnly cookies)
+- **Trust model:** the server is authoritative for all money movement, items, trades, and auctions (no client trust, no double-spend).
 
 ---
 
 ## Features
 
-- Full account system (register / login / change password)
-- Character customization (skin, hair, face, outfit, accessories) — new accounts are sent straight here and then to **PLAY**
-- Procedural, deterministic, seeded voxel world generation
-- 10,000 × 10,000 block world (X/Z –5000 to +5000) with world border
-- 16×16 procedural **chunk** system with streaming, caching, and persistence
-- Server-authoritative block breaking/placing, inventory, movement, and money
-- Economies: `/bal`, `/pay`, `/baltop`, starting balance `$10,000`
-- **Server Shop** (server-controlled prices in `shop_items`) and **Auction House** (player→player listings in `auction_listings`) are fully separate systems
-- `/shop` (buy/sell from the server) and `/ah` (player listings, search/sort/categories) with commands `/shop` `/sell` `/sellall` `/ah`
-- Teleportation: `/spawn`, `/rtp`, `/tpa`, `/tpahere`, `/tpaccept`, `/tpdeny`, `/home`, `/sethome`
-- Settings panel (TPA/TPAHere/chat/notifications) persisted per user; PvP is always enabled
-- Bases: build anywhere; block changes persist
-- Bounties: `/bounty <player> <amount>` and `/bounties`
-- **The Void** dimension with unique terrain and **Void Shards**
-- **Void Totems** — the only thing that protects you in the Void
-- **Stasis Chambers** — cooperative emergency recall for you and your friends
-- Friends system, leaderboards, homes, stats
+- Full account system (register / login / change password / logout)
+- Character customization (skin, hair, face, outfit, accessories) — new accounts go straight here, then to **PLAY**
+- Persistent 2D world with named **regions** (cities, towns, forests, mountains, farmlands, lakes, wilderness), each with deterministic **resource nodes**
+- **Gathering** — harvest wood, stone, ore, crops, sand, clay, water and more
+- **Production chains** — convert raw resources → processed → components → products at facilities (Mill / Factory / Workshop / Farm / Warehouse)
+- **Global market** — buy/sell orders with automatic matching, price history, 24h volume and trends
+- **Player shops** — purchase predefined, immutable **shop plots** (customize interior, not boundaries), restock with your inventory, and sell to other players
+- **Auction house** — list items, place bids, buyouts, expiration handling, automatic refunds
+- **Businesses** — found a company, manage members/roles, and own shared production facilities
+- **Property & construction** — buy land in regions and build to increase net worth
+- **Logistics / transport** — accept contracts to move goods between regions for rewards
+- **PvP & bounties** — place bounties on players, arena rating, kill/death tracking
+- **Crates** — earn loot boxes from exploration, milestones and events
+- **Social** — friends, trade offers, chat
+- **Leaderboards** — Richest Players (net worth = cash + inventory + property + market), top producers, top traders, highest level, PvP rating
+- **Opportunity system** — one-time exploration/milestone rewards (coins + XP + crates)
 
 ---
 
 ## Architecture Overview
 
 ```
-Browser (Three.js)
-   │  REST (/api/*) for auth, menus, economy, shop, auction, teleport, settings
-   │  Socket.IO for real-time: chunks, movement, block edits, chat, combat
+Browser (2D Canvas)
+   │  REST (/api/*) for auth, world, market, shops, auctions, production,
+   │              business, construction, transport, pvp, social, leaderboards
+   │  Socket.IO for presence, live movement relay, chat
    ▼
 Express + Socket.IO (server/index.js)
    ▼
-WorldEngine (procedural generation + chunk cache + persistence)
+Server-authoritative services (server/services/*)
+   │  economy.inventory.market.shop.auction.world.production...
    ▼
-Neon PostgreSQL (users, profiles, balances, chunks, shop_items, auction_listings, transactions, ...)
+Neon PostgreSQL (all persistence via Prisma)
 ```
 
-**Persistence strategy (performance):**
-- The entire world is **not** generated at startup. Chunks are generated on demand, deterministically from the world seed + dimension + chunk coordinates.
-- Generated terrain snapshots are stored **compressed** per chunk (one row per chunk, **not** per block).
-- Block edits are stored as a compressed modification list, saved separately from procedural generation and applied on load.
-- DB writes are **batched/debounced**; Neon is the persistent store, not the live game loop.
-- Chunks are LRU-cached in memory (max 2048) and only view-distance chunks are streamed to players.
-
----
-
-## Shop vs Auction House — Database Separation
-
-The **Server Shop** and the **Auction House** are two completely independent systems backed by separate tables.
-
-| Concept | Server Shop | Auction House |
-|---------|-------------|---------------|
-| Table | `shop_items` | `auction_listings` |
-| Owned by | Voidoria (the server) | Individual players |
-| Who sets prices | The server only | The seller (at list time) |
-| Players can | Buy / sell items | List / browse / buy / cancel listings |
-| Can players list? | No | Yes |
-| Can players edit prices? | No | Prices are fixed per listing |
-| Money movement | Player ⇄ system | Buyer → Seller (atomic) |
-
-Routes:
-- **Server Shop:** `GET /api/shop`, `POST /api/shop/buy`, `POST /api/shop/sell`, `POST /api/shop/sellall`
-- **Auction House:** `GET /api/ah`, `POST /api/ah/list`, `POST /api/ah/buy`, `POST /api/ah/cancel`
-
-History and money movement are recorded in `transactions` (types such as `SHOP_PURCHASE`, `SHOP_SALE`, `AUCTION_PURCHASE`, `PLAYER_PAYMENT`, `BOUNTY_REWARD`) and, for item-level Shop history, in `shop_transactions`.
+**Economy integrity:**
+- All balance changes occur inside Prisma database transactions with conditional updates (no double-spend, no negative balances).
+- Items are locked/reserved when listed for market sale, shop listing, or auction — refunded on cancel/expiry.
+- Auction bid funds are locked up-front and refunded to outbid players atomically.
+- Net worth uses conservative market values to avoid inflation exploits.
 
 ---
 
 ## 1. Prerequisites
 
-- Node.js **18+** (tested on Node 20/24)
+- Node.js **18+**
 - A free [Neon](https://neon.tech) PostgreSQL database
-
----
 
 ## 2. Install
 
@@ -93,45 +70,35 @@ History and money movement are recorded in `transactions` (types such as `SHOP_P
 npm install
 ```
 
----
-
 ## 3. Configure Neon
 
-1. Create a Neon project and grab your **connection string** (the `postgresql://...` one).
-2. Apply the schema using **either** approach:
+1. Create a Neon project and grab your connection string.
 
-   **Option A — Prisma (recommended for development):**
+   **Option A — Prisma (dev):**
    ```bash
    cp .env.example .env        # then edit .env with your DATABASE_URL
    npx prisma db push          # creates tables
-   npx prisma db seed          # seeds shop/bounties/admin
+   npm run db:seed             # seeds admin, world regions, resource nodes, shop plots
    ```
 
-   **Option B — Manual SQL (great for the Neon SQL Editor):**
-   Copy the contents of `neon_schema.sql` and paste it into the Neon **SQL Editor** on a fresh database, then run it. (Neon will use this instead of `prisma db push`.)
+   **Option B — Manual SQL (Neon SQL Editor):**
+   Paste the contents of `neon_schema.sql` into the Neon SQL Editor on a fresh DB and run it.
 
-The schema is also generated by Prisma at `prisma/schema.prisma` — keep them in sync if you modify either.
-
----
+   Keep `neon_schema.sql` and `prisma/schema.prisma` in sync if you modify either (regenerate with `prisma migrate diff --from-empty`).
 
 ## 4. Environment Variables
-
-Create a `.env` file from `.env.example`:
 
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `DATABASE_URL` | ✅ | Neon PostgreSQL connection string |
-| `SESSION_SECRET` | ✅ | Long random string |
 | `PORT` | | HTTP port (default `3000`) |
 | `NODE_ENV` | | `development` or `production` |
-| `WORLD_SEED` | | Deterministic world seed (integer) |
+| `WORLD_SEED` | | Deterministic world seed (default `20260831`) |
 | `ADMIN_USERNAME` | | Admin username (default `admin`) |
 | `ADMIN_PASSWORD` | | Admin password (auto-generated & logged if unset) |
 | `AUTO_PUSH_SCHEMA` | | `true` to auto-run `prisma db push` on dev startup |
 
-> **Never commit your real `.env`.** Only `.env.example` is committed.
-
----
+> **Never commit your real `.env`.**
 
 ## 5. Run Locally
 
@@ -143,70 +110,38 @@ npm start          # production-style start
 
 Then open **http://localhost:3000**
 
-The server:
-- Seeds the server Shop catalog (`shop_items`) and the admin user on first run.
-- Serves the static client from `public/`.
-- Runs Socket.IO on the same HTTP server for real-time play.
-
----
+On startup the server seeds the admin user, world regions + resource nodes, and the predefined shop plots.
 
 ## 6. How the Client Connects
 
 - The browser loads the SPA from `/`.
-- REST calls go to `/api/*` using the same-origin cookie for auth.
-- Real-time uses **Socket.IO** at the same origin. The socket authenticates with the same `session_token` cookie.
-- Chunk streaming: the client requests chunks within its view distance via the socket; the server generates/persists them and streams only those. Far chunks are unloaded.
+- REST calls go to `/api/*` using the same-origin httpOnly `session_token` cookie.
+- Socket.IO authenticates with the same cookie for presence/chat. **All economy actions still go through REST** so the server stays authoritative.
 
----
-
-## 7. How to Apply `neon_schema.sql`
-
-1. Open **Neon → your project → SQL Editor**.
-2. Paste the entire contents of `neon_schema.sql`.
-3. Click **Run**. The `BEGIN; ... COMMIT;` block is idempotent and safe to re-run.
-
-You can also apply it from the CLI:
-```bash
-psql "$DATABASE_URL" -f neon_schema.sql
-```
-
----
-
-## 8. Testing
+## 7. Testing
 
 ```bash
-npm run game:test      # terrain determinism/generation tests (no DB required)
-node tests/world.test.js   # world engine chunk/modification/persistence tests (mocked store)
+npm test           # game-definition integrity tests (no DB required)
 ```
 
----
+## 8. Admin
 
-## 9. Admin
+Log in as the admin username. Admin-only routes:
 
-Log in as the admin username. The admin panel exposes:
 - `GET /api/admin/players`
-- `POST /api/admin/give` (`{ username, amount }`)
-- `POST /api/admin/item` (`{ username, itemType, amount }`)
-- `GET/POST /api/admin/listings` (server Shop item/price/stock management in `shop_items`)
-- `GET /api/admin/categories` (distinct Shop categories)
+- `POST /api/admin/give` (`{ name, amount }`)
+- `POST /api/admin/item` (`{ name, itemType, amount }`)
+- `POST /api/admin/crate` (`{ name, kind }`)
 
----
+## 9. Production Deployment (Render)
 
-## 10. Production Deployment (Render example)
-
-1. Push this repository to GitHub.
-2. In Render, **New → Web Service** and point at the repo.
-3. Use `render.yaml` as a blueprint (or configure manually):
-   - **Build:** `npm install && npx prisma generate`
-   - **Start:** `npm start`
-   - **Env:** `DATABASE_URL`, `SESSION_SECRET`, `WORLD_SEED`, `NODE_ENV=production`, `ADMIN_PASSWORD`, `AUTO_PUSH_SCHEMA=false`
-4. Before first deploy, apply `neon_schema.sql` in the Neon SQL Editor (or set `AUTO_PUSH_SCHEMA=true` once).
+Use `render.yaml` as a blueprint (Build: `npm install && npx prisma generate`, Start: `npm start`). Apply `neon_schema.sql` once before first deploy (or set `AUTO_PUSH_SCHEMA=true` once).
 
 ---
 
 ## Notes on Fairness & Security
 
-- All money, block edits, item movements, auction purchases, and teleports are validated **server-side**. The client only sends *intent*; the server authoritatively updates state.
-- Economy actions use database transactions (no double-spend, no negative balances, atomic auction claims).
-- Movement is throttled and speed checked to deter teleport/cheat clients.
-- PvP, bounties, Void Totems, and Stasis Chamber pulls are enforced by the server, not the client.
+- All money, items, trades, market fills, shop purchases, and auction outcomes are validated **server-side**; the client only sends intent.
+- Economy actions use database transactions with conditional updates and reserved funds — no double-spend, no negative balances, no fake purchases.
+- Movement is speed-checked server-side to deter teleport/cheat clients.
+- Shop plot properties (size, position) are immutable and server-defined.

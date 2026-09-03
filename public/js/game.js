@@ -1,986 +1,729 @@
-import { io } from "../vendor/socket.io.esm.min.js";
-
+/* ============================================================================
+ * VOIDORIA — 2D top-down Canvas economy-MMO client
+ * Server is authoritative for all economy actions; this client only renders
+ * and issues REST calls.
+ * ==========================================================================*/
 (function () {
-  const $ = (s) => document.querySelector(s);
-  const $$ = (s) => Array.from(document.querySelectorAll(s));
+  const $ = (id) => document.getElementById(id);
+  const ui = { notify: (msg, ok) => null };
 
-  const UI = {
-    authScreen: $("#auth-screen"),
-    customizeScreen: $("#customize-screen"),
-    dashboardScreen: $("#dashboard-screen"),
-    game: $("#game"),
-    connecting: $("#connecting"),
-    menuOverlay: $("#menu-overlay"),
+  const DECOR = {
+    wood: "#5b8c3a", stone: "#8f9297", iron_ore: "#cd7f5b", copper_ore: "#d08b52",
+    coal: "#3a3a3a", wheat: "#d9c15c", cotton: "#e8e4d8", sand: "#e0d5a8",
+    clay: "#b98a54", water: "#5a9fd6", gold_ore: "#e0b64a", berries: "#8a4a8a",
+    lumber: "#8a6138", metal_parts: "#9aa0a8", copper: "#c9805a", glass: "#aee3ea",
+    brick: "#b4552e", flour: "#efe6cf", thread: "#d9cdb8", fuel: "#2f2f2f",
+    planks: "#a4763f", metal_component: "#b0b6bd", wiring: "#e0a54a",
+    fabric: "#c9b8d9", furniture: "#9c6b3a", machinery: "#6b6870",
+    electronics: "#5f6a7a", brick_block: "#a04a28", glass_pane: "#bfe6ec",
+    bread: "#e0b056", jam: "#c84a4a", stone_pickaxe: "#7a8087",
+    iron_pickaxe: "#b9bec7", axe: "#b9a26b", wagon: "#6b4a2a", gem: "#a78bfa",
+    blueprint: "#7b5cf6", crate_common: "#a4763f", crate_rare: "#5a9fd6",
+    crate_epic: "#a78bfa", crate_legendary: "#f0c24a",
   };
 
-  // block color map for hotbar/shop icons (matching server block ids)
-  const BLOCK_COLORS = {
-    "block:dirt": "#8a5a36", "block:grass": "#5fb04a", "block:stone": "#8a8a8a",
-    "block:cobblestone": "#6f6f6f", "block:planks": "#b99666", "block:wood": "#6b4a2a",
-    "block:leaves": "#3f9c35", "block:sand": "#e8dba0", "block:sandstone": "#d8c699",
-    "block:gravel": "#7f7f7f", "block:glass": "#bcd7e8", "block:coal_ore": "#3a3a3a",
-    "block:iron_ore": "#d8b38a", "block:gold_ore": "#f5cd42", "block:diamond_ore": "#58e0c3",
-    "block:void_ore": "#6b21a8", "block:void_stone": "#2b2440", "block:void_grass": "#5b4ab0",
-    "block:cactus": "#3a8a32", "block:flower": "#ff7bd5", "block:stasis_chamber": "#7b5cf6",
-  };
+  /* ---------------- SVG icon generator ---------------- */
+  function iconSvg(emoji, size) {
+    const s = size || 22;
+    return `<svg width="${s}" height="${s}" viewBox="0 0 32 32" aria-hidden="true"><text x="16" y="23" font-size="20" text-anchor="middle">${emoji}</text></svg>`;
+  }
 
-  const state = {
-    user: null,
-    profile: null,
-    settings: null,
-    inventory: [],
-    catalog: {},
-    selectedHotbar: 0,
-    hotbar: new Array(9).fill(null),
-    levelXpNeed: 100,
-    socket: null,
-    engine: null,
-    connected: false,
-  };
-
+  /* ================= FLOW CONTROLLER ================= */
   const VOIDORIA = {
-    state,
-    getSelectedHotbar() { return state.hotbar[state.selectedHotbar]; },
+    user: null,
+    isNew: false,
+    player: null,
 
-    async goCustomize(user) {
-      UI.authScreen.style.display = "none";
+    show(id) {
+      ["auth-screen", "customize-screen", "dashboard-screen", "game"].forEach((x) => {
+        $(x).style.display = x === id ? (id === "customize-screen" || id === "dashboard-screen" ? "flex" : "block") : "none";
+      });
+    },
+
+    goCustomize(user) {
+      VOIDORIA.user = user;
       window.Customize.show();
     },
 
     async showDashboard(user) {
-      state.user = user;
-      UI.authScreen.style.display = "none";
-      UI.customizeScreen.style.display = "none";
-      UI.game.style.display = "none";
-      UI.menuOverlay.style.display = "none";
-      await loadProfile();
-      renderDashboard();
-      UI.dashboardScreen.style.display = "flex";
+      VOIDORIA.user = user;
+      $("dashboard-screen").style.display = "flex";
+      $("auth-screen").style.display = "none";
+      $("customize-screen").style.display = "none";
+      $("game").style.display = "none";
+      try {
+        const snap = await API.profile.me();
+        VOIDORIA.player = snap;
+        $("dash-name").textContent = snap.profile?.displayName || user?.username || "Survivor";
+        const st = snap.stats || {};
+        $("dash-stats").innerHTML = `
+          <div class="stat-chip">Balance <b>$${num(snap.balance)}</b></div>
+          <div class="stat-chip">Net Worth <b>$${num(snap.netWorth)}</b></div>
+          <div class="stat-chip">Level <b>${st.level || 1}</b></div>
+          <div class="stat-chip">Region <b>${snap.profile?.region || "Aurora"}</b></div>`;
+        $("dashboard-msg").textContent = "";
+      } catch (e) {
+        $("dashboard-msg").textContent = "Could not load profile: " + e.message;
+      }
     },
 
     async enterGame(user) {
-      state.user = user;
-      UI.authScreen.style.display = "none";
-      UI.customizeScreen.style.display = "none";
-      UI.dashboardScreen.style.display = "none";
-      UI.game.style.display = "block";
-      UI.connecting.style.display = "flex";
-      await loadProfile();
-      const meta = await API.meta();
-      const cat = await API.world.catalog();
-      state.catalog = cat.catalog;
-      initEngine();
-      await connectSocket();
-      if (!state.connected) {
-        notice("Failed to connect to game server", true);
-      }
-      UI.connecting.style.display = "none";
+      VOIDORIA.user = user;
+      $("game").style.display = "block";
+      $("auth-screen").style.display = "none";
+      $("customize-screen").style.display = "none";
+      $("dashboard-screen").style.display = "none";
+      $("connecting").style.display = "flex";
+      await Game.start();
+      $("connecting").style.display = "none";
     },
 
-    notify(title, msg, kind) { notice(title, msg, kind); },
+    async logout() {
+      try { await API.auth.logout(); } catch (_) {}
+      location.reload();
+    },
+  };
+
+  function num(n) {
+    n = Number(n || 0);
+    return n.toLocaleString("en-US");
+  }
+
+  /* ================= 2D GAME ENGINE ================= */
+  const Game = {
+    canvas: null, ctx: null,
+    state: {
+      x: 0, y: 0, region: "Aurora", balance: 0, netWorth: 0, level: 1, xp: 0,
+      inventory: [], crates: [], regions: [], bounds: { minX: -400, maxX: 400, minY: -400, maxY: 400 },
+    },
+    keys: {}, camera: { x: 0, y: 0 }, anim: 0,
+    entries: {}, // other online players (socket)
+
+    async start() {
+      Game.canvas = $("game-canvas");
+      Game.ctx = Game.canvas.getContext("2d");
+      Game.resize();
+      window.addEventListener("resize", Game.resize);
+
+      const [snap, meta] = await Promise.all([API.profile.me(), API.meta()]);
+      Game.state.inventory = snap.inventory || [];
+      Game.state.crates = snap.crates || [];
+      Game.state.balance = snap.balance;
+      Game.state.netWorth = snap.netWorth;
+      Game.state.level = snap.stats?.level || 1;
+      Game.state.xp = snap.stats?.xp || 0;
+      Game.state.x = snap.profile?.posX || 0;
+      Game.state.y = snap.profile?.posY || 0;
+      if (meta.world) Game.state.bounds = meta.world;
+
+      try { const r = await API.world.regions(); Game.state.regions = r.regions || []; Game.state.spawn = r.spawn || { x: 0, y: 0 }; } catch (_) {}
+
+      Game.bindKeys();
+      Game.bindChat();
+      Game.updateHud();
+      Game.loop();
+    },
+
+    resize() {
+      Game.canvas.width = window.innerWidth;
+      Game.canvas.height = window.innerHeight;
+    },
+
+    bindKeys() {
+      window.addEventListener("keydown", (e) => {
+        Game.keys[e.key.toLowerCase()] = true;
+        if (e.key === "t" || e.key === "T") {
+          const ci = $("chat-input");
+          ci.style.display = "block"; ci.focus();
+        }
+        if (e.key === "Escape") { Game.closeMenu(); $("chat-input").style.display = "none"; }
+      });
+      window.addEventListener("keyup", (e) => { Game.keys[e.key.toLowerCase()] = false; });
+    },
+
+    bindChat() {
+      const input = $("chat-input");
+      const box = $("chat-messages");
+      const promote = () => { box.scrollTop = box.scrollHeight; };
+      this.pushChat = (msg) => {
+        const d = document.createElement("div");
+        d.className = "cm"; d.textContent = msg;
+        box.appendChild(d); while (box.children.length > 40) box.removeChild(box.firstChild);
+        promote();
+      };
+      input.addEventListener("keydown", async (e) => {
+        if (e.key === "Enter") {
+          const text = input.value.trim();
+          input.value = "";
+          if (text) {
+            if (text.startsWith("/")) Game.handleCommand(text);
+            else Game.pushChat("You: " + text);
+          }
+          input.style.display = "none";
+        }
+        if (e.key === "Escape") input.style.display = "none";
+      });
+      $("chat-messages").addEventListener("click", () => { $("chat-input").style.display = "block"; $("chat-input").focus(); });
+    },
+
+    async handleCommand(text) {
+      const [cmd, ...rest] = text.slice(1).split(" ");
+      const r = rest.join(" ");
+      try {
+        switch (cmd) {
+          case "help": Game.pushChat("Commands: /bal /networth /market /inventory /gather <nodeId> /find <name> /pay <name> <amt> /bounty <targetId> <amt>"); break;
+          case "bal": { const b = await API.economy.balance(); Game.pushChat("Balance: $" + num(b.balance)); break; }
+          case "networth": { const nw = await API.economy.networth(); Game.pushChat("Net worth: $" + num(nw.netWorth)); break; }
+          case "inventory": Game.openPanel("inventory"); break;
+          case "market": Game.openPanel("market"); break;
+          case "gather": if (r) { await Game.gatherAt(Number(r)); } break;
+          case "find": { const p = await API.social.find(r); Game.pushChat(r + " = " + p.id); break; }
+          case "pay": {
+            const [to, amt] = r.split(" ");
+            await API.economy.pay({ toName: to, amount: Number(amt) });
+            Game.notify("Paid $" + amt + " to " + to, true);
+            break;
+          }
+          case "bounty": { const [targetId, amt] = r.split(" "); await API.pvp.bounty({ targetId, amount: Number(amt) }); Game.notify("Bounty placed", true); break; }
+          default: Game.pushChat("Unknown command: /" + cmd);
+        }
+      } catch (err) {
+        Game.pushChat("Error: " + err.message);
+      }
+    },
+
+    notify(msg, ok) {
+      const n = document.createElement("div");
+      n.className = "toast" + (ok ? " ok" : " err");
+      n.textContent = msg;
+      $("notifications").appendChild(n);
+      setTimeout(() => n.remove(), 4500);
+    },
+
+    // ---------- Movement ----------
+    applyMove() {
+      const speed = 4;
+      let dx = 0, dy = 0;
+      if (Game.keys["w"] || Game.keys["arrowup"]) dy -= 1;
+      if (Game.keys["s"] || Game.keys["arrowdown"]) dy += 1;
+      if (Game.keys["a"] || Game.keys["arrowleft"]) dx -= 1;
+      if (Game.keys["d"] || Game.keys["arrowright"]) dx += 1;
+      if (dx || dy) {
+        const len = Math.hypot(dx, dy);
+        const nx = Game.state.x + (dx / len) * speed;
+        const ny = Game.state.y + (dy / len) * speed;
+        const b = Game.state.bounds;
+        const cx = Math.max(b.minX, Math.min(b.maxX, nx));
+        const cy = Math.max(b.minY, Math.min(b.maxY, ny));
+        API.world.move({ x: cx, y: cy }).then((r) => {
+          Game.state.x = r.x; Game.state.y = r.y; Game.state.region = r.region;
+          $("hud-coords").textContent = `${Math.round(r.x)},${Math.round(r.y)}`;
+          $("hud-region").textContent = r.region;
+        }).catch((e) => Game.notify(e.message));
+      }
+    },
+
+    // ---------- Canvas render ----------
+    loop() {
+      Game.applyMove();
+      Game.anim += 0.05;
+      Game.render();
+      requestAnimationFrame(Game.loop);
+    },
+
+    regionColor(r) {
+      const map = {
+        CITY: "#222a44", COMMERCIAL: "#2f2a52", INDUSTRIAL: "#2a2f3a",
+        TOWN: "#26304a", FOREST: "#1f3a22", MOUNTAIN: "#3a352c",
+        RESOURCE: "#3a3426", AGRI: "#2c3a20", LAKE: "#16304a",
+        RIVER: "#1a3a52", WILDERNESS: "#2c2c30",
+      };
+      return map[r.kind] || "#2c2c30";
+    },
+
+    regionName(r) {
+      const colors = { FOREST: "#6fd94a", MOUNTAIN: "#d9a25c", AGRI: "#d9c15c", LAKE: "#5a9fd6", RIVER: "#5a9fd6", RESOURCE: "#e0b64a", CITY: "#a78bfa", COMMERCIAL: "#a78bfa", INDUSTRIAL: "#90a0c0", TOWN: "#7bd0c0", WILDERNESS: "#9aa0a8" };
+      return colors[r.kind] || "#ccc";
+    },
+
+    async render() {
+      const ctx = Game.ctx;
+      const W = Game.canvas.width, H = Game.canvas.height;
+      const cx = Game.state.x, cy = Game.state.y;
+      const scale = 40; // world-units -> tile mapping approx (1 unit ~ 1 tile)
+
+      // background
+      ctx.fillStyle = "#141824";
+      ctx.fillRect(0, 0, W, H);
+
+      // grid
+      ctx.strokeStyle = "rgba(255,255,255,0.04)";
+      ctx.lineWidth = 1;
+      for (let gx = Math.floor(cx - W / 2 / scale); gx <= cx + W / 2 / scale; gx++) {
+        const sx = (gx - cx) * scale + W / 2;
+        ctx.beginPath(); ctx.moveTo(sx, 0); ctx.lineTo(sx, H); ctx.stroke();
+      }
+      for (let gy = Math.floor(cy - H / 2 / scale); gy <= cy + H / 2 / scale; gy++) {
+        const sy = (gy - cy) * scale + H / 2;
+        ctx.beginPath(); ctx.moveTo(0, sy); ctx.lineTo(W, sy); ctx.stroke();
+      }
+
+      // regions (draw all, subtle)
+      for (const r of Game.state.regions) {
+        const rx = (r.x - cx) * scale + W / 2;
+        const ry = (r.y - cy) * scale + H / 2;
+        if (Math.abs(rx) > W + r.radius * scale || Math.abs(ry) > H + r.radius * scale) continue;
+        ctx.globalAlpha = 0.16;
+        ctx.fillStyle = Game.regionColor(r);
+        ctx.beginPath(); ctx.arc(rx, ry, r.radius * scale, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = Game.regionName(r);
+        ctx.font = "11px sans-serif";
+        ctx.fillText(r.name, rx + 6, ry - 6);
+      }
+
+      // spawn marker
+      if (Game.state.spawn) {
+        const sx = (Game.state.spawn.x - cx) * scale + W / 2;
+        const sy = (Game.state.spawn.y - cy) * scale + H / 2;
+        ctx.fillStyle = "#7b5cf6";
+        ctx.beginPath(); ctx.arc(sx, sy, 8, 0, Math.PI * 2); ctx.fill();
+      }
+
+      // resource nodes near player
+      try {
+        const nodes = await API.world.nodes(cx, cy, 30);
+        for (const n of nodes) {
+          const nx = (n.x - cx) * scale + W / 2;
+          const ny = (n.y - cy) * scale + H / 2;
+          if (nx < -20 || ny < -20 || nx > W + 20 || ny > H + 20) continue;
+          const col = DECOR[n.itemDef] || "#888";
+          ctx.fillStyle = col;
+          ctx.beginPath();
+          ctx.arc(nx, ny + Math.sin(Game.anim + nx) * 3, 7, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = "rgba(255,255,255,0.25)";
+          ctx.stroke();
+          ctx.fillStyle = "#eee";
+          ctx.font = "9px sans-serif";
+          ctx.fillText(n.icon, nx + 11, ny + 4);
+        }
+        Game.state.nearbyNodes = (await API.world.nodes(cx, cy)).slice(0, 6);
+      } catch (_) {}
+
+      // other players (socket presence, simplified)
+      for (const other of Object.values(Game.entries)) {
+        const ox = (other.x - cx) * scale + W / 2;
+        const oy = (other.y - cy) * scale + H / 2;
+        ctx.fillStyle = "#e0a54a";
+        ctx.beginPath(); ctx.arc(ox, oy, 6, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = "#fff"; ctx.font = "9px sans-serif"; ctx.fillText(other.name, ox + 8, oy + 4);
+      }
+
+      // player
+      const px = W / 2, py = H / 2;
+      ctx.fillStyle = "#7b5cf6";
+      ctx.beginPath(); ctx.arc(px, py, 8, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.stroke();
+    },
+
+    // ---------- Gathering ----------
+    async gatherNear() {
+      // gather the nearest node to the player (client side, server validates)
+      const nodes = await API.world.nodes(Game.state.x, Game.state.y, 4).catch(() => []);
+      if (!nodes.length) { Game.notify("No resources in reach"); return; }
+      try {
+        const r = await API.world.gather({ nodeId: nodes[0].id });
+        Game.notify(`Gathered ${r.amount} x ${r.itemDef} (${r.remaining} left)`, true);
+        Game.refreshInventory();
+      } catch (e) { Game.notify(e.message); }
+    },
+    async gatherAt(nodeId) {
+      try { const r = await API.world.gather({ nodeId }); Game.notify(`Gathered ${r.amount}`, true); Game.refreshInventory(); }
+      catch (e) { Game.notify(e.message); }
+    },
+
+    async refreshInventory() {
+      try {
+        const snap = await API.profile.me();
+        Game.state.inventory = snap.inventory;
+        Game.state.crates = snap.crates;
+        Game.state.balance = snap.balance;
+        Game.state.netWorth = snap.netWorth;
+        Game.updateHud();
+        if ($("panel-inventory").style.display !== "none") Game.renderInventoryPanel();
+      } catch (_) {}
+    },
+
+    updateHud() {
+      $("hud-currency").textContent = "$" + num(Game.state.balance);
+      $("hud-networth").textContent = "NW $" + num(Game.state.netWorth);
+      $("hud-level").textContent = "Lv " + Game.state.level;
+      const xpInLevel = Game.state.xp % 100;
+      $("bar-xp").style.width = Math.min(100, xpInLevel) + "%";
+    },
+
+    // ---------- Menu ----------
+    bindMenu() {
+      Game.bindStaticUI();
+    },
+
+    bindStaticUI() {
+      $("btn-menu").addEventListener("click", () => Game.openMenu());
+      $("btn-close-menu").addEventListener("click", () => Game.closeMenu());
+      $("btn-logout").addEventListener("click", () => VOIDORIA.logout());
+      document.querySelectorAll(".mnav").forEach((b) => {
+        b.addEventListener("click", () => {
+          document.querySelectorAll(".mnav").forEach((x) => x.classList.toggle("active", x === b));
+          Game.openPanel(b.dataset.panel);
+        });
+      });
+      document.getElementById("customize-play").addEventListener("click", async () => {
+        const appearance = window.Customize.getState();
+        try {
+          await API.profile.appearance({ appearance });
+          VOIDORIA.enterGame(VOIDORIA.user);
+        } catch (e) {
+          $("customize-msg").textContent = e.message;
+        }
+      });
+      $("dashboard-play").addEventListener("click", () => VOIDORIA.enterGame(VOIDORIA.user));
+      $("dashboard-logout").addEventListener("click", () => VOIDORIA.logout());
+      $("dashboard-customize").addEventListener("click", () => { window.Customize.show(); });
+    },
+
+    openMenu() { $("menu-overlay").style.display = "flex"; Game.openPanel(document.querySelector(".mnav.active")?.dataset.panel || "profile"); },
+    closeMenu() { $("menu-overlay").style.display = "none"; },
+
+    async openPanel(name) {
+      const panel = $("panel-" + name);
+      document.querySelectorAll(".panel").forEach((p) => (p.style.display = "none"));
+      panel.style.display = "block";
+      panel.innerHTML = "<div class='loading'>Loading...</div>";
+      try {
+        switch (name) {
+          case "profile": await Game.renderProfilePanel(panel); break;
+          case "inventory": await Game.renderInventoryPanel(panel); break;
+          case "market": await Game.renderMarketPanel(panel); break;
+          case "shop": await Game.renderShopPanel(panel); break;
+          case "auction": await Game.renderAuctionPanel(panel); break;
+          case "production": await Game.renderProductionPanel(panel); break;
+          case "business": await Game.renderBusinessPanel(panel); break;
+          case "construction": await Game.renderConstructionPanel(panel); break;
+          case "transport": await Game.renderTransportPanel(panel); break;
+          case "pvp": await Game.renderPvpPanel(panel); break;
+          case "crates": await Game.renderCratesPanel(panel); break;
+          case "social": await Game.renderSocialPanel(panel); break;
+          case "leaderboards": await Game.renderLeaderboardsPanel(panel); break;
+          case "transactions": await Game.renderTransactionsPanel(panel); break;
+        }
+      } catch (e) {
+        panel.innerHTML = `<div class="panel-err">${e.message}</div>`;
+      }
+    },
+
+    async renderProfilePanel(panel) {
+      const nw = await API.economy.networth();
+      const snap = Game.state;
+      panel.innerHTML = `
+        <h3>Profile</h3>
+        <div class="kv">Balance <b>$${num(snap.balance)}</b></div>
+        <div class="kv">Net Worth <b>$${num(nw.netWorth)}</b></div>
+        <div class="kv">Cash <b>$${num(nw.cash)}</b></div>
+        <div class="kv">Inventory Value <b>$${num(nw.inventoryWorth)}</b></div>
+        <div class="kv">Property Value <b>$${num(nw.propertyWorth)}</b></div>
+        <div class="kv">Market Locked <b>$${num(nw.lockedMarketWorth)}</b></div>
+        <div class="kv">Level <b>${snap.level}</b> &middot; XP <b>${snap.xp}</b></div>
+        <div class="kv">Position <b>${Math.round(snap.x)},${Math.round(snap.y)}</b></div>
+        <div class="kv">Region <b>${snap.region}</b></div>
+        <h4 style="margin-top:16px">Nearby Resources</h4>
+        <div id="nearby-list">${(snap.nearbyNodes || []).map((n) => `<div class="kv small">${n.icon} ${n.name} <button class="btn tiny" data-gather="${n.id}">Gather</button></div>`).join("")}</div>`;
+      panel.querySelectorAll("[data-gather]").forEach((b) => b.addEventListener("click", () => Game.gatherAt(b.dataset.gather)));
+    },
+
+    async renderInventoryPanel(panel = $("panel-inventory")) {
+      const inv = Game.state.inventory || [];
+      panel.innerHTML = `<h3>Inventory (${inv.length})</h3><div class="item-grid">${
+        inv.map((i) => `<div class="item-card"><div class="ic">${iconSvg(DECOR[i.itemDef] ? "▪" : "▪", 22)}</div><div class="iname">${i.itemDef}</div><div class="inqty">x${i.amount}</div></div>`).join("")
+      }</div>`;
+    },
+
+    async renderMarketPanel(panel = $("panel-market")) {
+      const [items, overview, my] = await Promise.all([API.market.items(), API.market.overview(), API.market.my()]);
+      const list = overview || [];
+      panel.innerHTML = `<h3>Global Market</h3>
+        <div class="table"><table><tr><th>Item</th><th>Base</th><th>Last</th><th>Best Buy</th><th>Best Sell</th><th>24h Vol</th></tr>${
+          list.map((m) => `<tr><td>${m.icon} ${m.name}</td><td>$${num(m.baseValue)}</td><td>$${num(m.lastPrice)}</td><td>${m.bestBuy ? "$"+num(m.bestBuy) : "-"}</td><td>${m.bestSell ? "$"+num(m.bestSell) : "-"}</td><td>${m.volume24h}</td></tr>`).join("")
+        }</table></div>
+        <h4>Place Order</h4>
+        <div class="form-row">
+          <select id="mkt-item">${Object.keys(items.items||{}).map((id) => `<option value="${id}">${items.items[id].name}</option>`).join("")}</select>
+          <input id="mkt-qty" type="number" placeholder="Qty" min="1" />
+          <input id="mkt-price" type="number" placeholder="Unit price" min="1" />
+          <button class="btn" id="mkt-sell">Sell</button>
+          <button class="btn" id="mkt-buy">Buy</button>
+        </div>
+        <h4>My Orders</h4>
+        <div class="table"><table><tr><th>Item</th><th>Side</th><th>Qty</th><th>Price</th><th>Status</th><th></th></tr>${
+          (my||[]).map((o) => `<tr><td>${o.itemDef}</td><td>${o.side}</td><td>${o.filled}/${o.quantity}</td><td>$${num(o.unitPrice)}</td><td>${o.status}</td><td>${(o.status==="OPEN"||o.status==="PARTIAL")?`<button class="btn tiny" data-cancel="${o.id}">Cancel</button>`:""}</td></tr>`).join("")
+        }</table></div>`;
+      panel.querySelector("#mkt-sell").addEventListener("click", async () => {
+        try {
+          const r = await API.market.sell({ itemDef: panel.querySelector("#mkt-item").value, quantity: Number(panel.querySelector("#mkt-qty").value), unitPrice: Number(panel.querySelector("#mkt-price").value) });
+          Game.notify(`Sold ${r.sold} for $${num(r.revenue)}` + (r.listed ? `, listed ${r.listed}` : ""), true);
+          Game.refreshInventory(); await Game.renderMarketPanel(panel);
+        } catch (e) { Game.notify(e.message); }
+      });
+      panel.querySelector("#mkt-buy").addEventListener("click", async () => {
+        try {
+          const r = await API.market.buy({ itemDef: panel.querySelector("#mkt-item").value, quantity: Number(panel.querySelector("#mkt-qty").value), unitPrice: Number(panel.querySelector("#mkt-price").value) });
+          Game.notify(`Bought ${r.bought} for $${num(r.spent)}` + (r.remaining ? `, listed ${r.remaining}` : ""), true);
+          Game.refreshInventory(); await Game.renderMarketPanel(panel);
+        } catch (e) { Game.notify(e.message); }
+      });
+      panel.querySelectorAll("[data-cancel]").forEach((b) => b.addEventListener("click", async () => { try { await API.market.cancel(b.dataset.cancel); Game.notify("Order cancelled", true); Game.renderMarketPanel(panel); } catch (e) { Game.notify(e.message); } }));
+    },
+
+    async renderShopPanel(panel = $("panel-shop")) {
+      const [my, plots, all] = await Promise.all([API.shop.my(), API.shop.plots(), API.shop.all()]);
+      panel.innerHTML = `
+        <h3>My Shop</h3>
+        ${my && my.shop ? `
+          <div class="kv">Plot: <b>${my.shop.plot.name}</b> &middot; ${my.shop.name}</div>
+          <div class="kv">Sign: ${my.shop.sign || "—"}</div>
+          <h4>Listings</h4>
+          <div class="table"><table><tr><th>Item</th><th>Price</th><th>Qty</th><th></th></tr>${
+            (my.shop.listings||[]).map((l) => `<tr><td>${l.itemDef}</td><td>$${num(l.price)}</td><td>${l.quantity-l.sold}-${l.quantity}</td><td><button class="btn tiny" data-rm="${l.id}">rm</button></td></tr>`).join("")
+          }</table></div>
+          <div class="form-row">
+            <select id="sp-item">${Object.entries(DECOR).map(([k]) => `<option value="${k}">${k}</option>`).join("")}</select>
+            <input id="sp-qty" type="number" placeholder="Qty" min="1" value="1"/>
+            <input id="sp-price" type="number" placeholder="Price" min="1"/>
+            <button class="btn" id="sp-add">Add Listing</button>
+          </div>
+          <div class="form-row">
+            <input id="sp-name" type="text" placeholder="Shop name" value="${my.shop.name}"/>
+            <button class="btn" id="sp-rename">Rename</button>
+          </div>` : `
+          <p>You have no shop. Purchase a plot to open your storefront.</p>
+          <div class="table"><table><tr><th>Plot</th><th>Region</th><th>Cost</th><th></th></tr>${
+            (plots||[]).map((p) => `<tr><td>${p.name}</td><td>${p.regionKey}</td><td>$${num(Math.round(Number(p.baseValue)*p.commercialPremium))}</td><td><button class="btn tiny" data-buy="${p.plotKey}">Buy</button></td></tr>`).join("")
+          }</table></div>`}
+        <h4 style="margin-top:18px">Open Player Shops</h4>
+        <div class="table"><table><tr><th>Shop</th><th>Item</th><th>Price</th><th>Qty</th><th></th></tr>${
+          (all||[]).flatMap((s) => (s.listings||[]).map((l) => `<tr><td>${s.name}</td><td>${l.name||l.itemDef}</td><td>$${num(l.price)}</td><td>${l.quantity}</td><td><button class="btn tiny" data-buyshop="${l.id}">Buy</button></td></tr>`)).join("")
+        }</table></div>`;
+      panel.querySelectorAll("[data-buy]").forEach((b) => b.addEventListener("click", async () => { try { await API.shop.purchase({ plotKey: b.dataset.buy }); Game.notify("Plot purchased!", true); Game.renderShopPanel(panel); } catch (e) { Game.notify(e.message); } }));
+      const add = panel.querySelector("#sp-add");
+      if (add) add.addEventListener("click", async () => { try { await API.shop.listing({ itemDef: panel.querySelector("#sp-item").value, quantity: Number(panel.querySelector("#sp-qty").value), price: Number(panel.querySelector("#sp-price").value) }); Game.notify("Listed!", true); Game.refreshInventory(); Game.renderShopPanel(panel); } catch (e) { Game.notify(e.message); } });
+      const ren = panel.querySelector("#sp-rename");
+      if (ren) ren.addEventListener("click", async () => { try { await API.shop.customize({ name: panel.querySelector("#sp-name").value }); Game.notify("Renamed", true); } catch (e) { Game.notify(e.message); } });
+      panel.querySelectorAll("[data-rm]").forEach((b) => b.addEventListener("click", async () => { try { await API.shop.removeListing(b.dataset.rm); Game.notify("Removed", true); Game.renderShopPanel(panel); } catch (e) { Game.notify(e.message); } }));
+      panel.querySelectorAll("[data-buyshop]").forEach((b) => b.addEventListener("click", async () => { try { await API.shop.buy(b.dataset.buyshop, 1); Game.notify("Purchased", true); Game.refreshInventory(); } catch (e) { Game.notify(e.message); } }));
+    },
+
+    async renderAuctionPanel(panel = $("panel-auction")) {
+      const active = await API.auction.active();
+      panel.innerHTML = `
+        <h3>Auction House</h3>
+        <div class="table"><table><tr><th>Item</th><th>Qty</th><th>Current</th><th>Start</th><th>Buyout</th><th>Seller</th><th>Expires</th><th></th></tr>${
+          (active||[]).map((a) => `<tr><td>${a.icon} ${a.name}</td><td>${a.quantity}</td><td>$${num(a.currentBid)}</td><td>$${num(a.startPrice)}</td><td>${a.buyoutPrice?"$"+num(a.buyoutPrice):"-"}</td><td>${a.seller}</td><td>${new Date(a.expiresAt).toLocaleString()}</td>
+            <td>
+              <input class="mini" id="bid-${a.id}" type="number" placeholder="bid" />
+              <button class="btn tiny" data-bid="${a.id}" data-min="${a.currentBid}">Bid</button>
+              ${a.buyoutPrice?`<button class="btn tiny" data-buyout="${a.id}">Buyout</button>`:""}
+            </td></tr>`).join("")
+        }</table></div>
+        <h4>List Item</h4>
+        <div class="form-row">
+          <select id="aul-item">${Object.entries(DECOR).map(([k]) => `<option value="${k}">${k}</option>`).join("")}</select>
+          <input id="aul-qty" type="number" placeholder="Qty" min="1" value="1"/>
+          <input id="aul-start" type="number" placeholder="Start" min="1"/>
+          <input id="aul-buyout" type="number" placeholder="Buyout"/><span>（optional）</span>
+          <button class="btn" id="aul-create">List</button>
+        </div>`;
+      panel.querySelectorAll("[data-bid]").forEach((b) => b.addEventListener("click", async () => {
+        const inp = panel.querySelector("#bid-" + b.dataset.bid);
+        try { await API.auction.bid(b.dataset.bid, Number(inp.value)); Game.notify("Bid placed", true); Game.renderAuctionPanel(panel); } catch (e) { Game.notify(e.message); }
+      }));
+      panel.querySelectorAll("[data-buyout]").forEach((b) => b.addEventListener("click", async () => { try { await API.auction.buyout(b.dataset.buyout); Game.notify("Bought out!", true); Game.refreshInventory(); Game.renderAuctionPanel(panel); } catch (e) { Game.notify(e.message); } }));
+      panel.querySelector("#aul-create").addEventListener("click", async () => {
+        try {
+          await API.auction.create({ itemDef: panel.querySelector("#aul-item").value, quantity: Number(panel.querySelector("#aul-qty").value), startPrice: Number(panel.querySelector("#aul-start").value), buyoutPrice: panel.querySelector("#aul-buyout").value ? Number(panel.querySelector("#aul-buyout").value) : null });
+          Game.notify("Listed for auction", true); Game.refreshInventory(); Game.renderAuctionPanel(panel);
+        } catch (e) { Game.notify(e.message); }
+      });
+    },
+
+    async renderProductionPanel(panel = $("panel-production")) {
+      const jobs = await API.production.jobs();
+      const biz = await API.business.my().catch(() => []);
+      const mine = biz.filter((b) => b.role === "OWNER");
+      panel.innerHTML = `<h3>Production</h3>
+        <p>Run recipes at a facility to convert raw materials into products. Zero-downtime: poll refreshes finished batches.</p>
+        <input id="pd-fac-name" placeholder="Facility name" style="width:140px"/>
+        <select id="pd-fac-kind"><option value="WORKSHOP">Workshop</option><option value="FACTORY">Factory</option><option value="MILL">Mill</option><option value="FARM">Farm</option><option value="WAREHOUSE">Warehouse</option></select>
+        <button class="btn" id="pd-create-fac">Create Facility</button>
+        ${jobs.jobs && jobs.jobs.length ? `
+          <h4>My Jobs</h4>
+          <div class="table"><table><tr><th>Recipe</th><th>Progress</th><th>Status</th></tr>${
+            jobs.jobs.map((j) => `<tr><td>${j.recipeKey}</td><td>${j.produced}/${j.target}</td><td>${j.status}</td></tr>`).join("")
+          }</table></div>
+          ${jobs.completed.length?`<div class="note ok">Completed batches produced goods!</div>`:""}` : `<p>No active jobs.</p>`}`;
+      panel.querySelector("#pd-create-fac").addEventListener("click", async () => {
+        try { await API.production.facility({ kind: panel.querySelector("#pd-fac-kind").value, name: panel.querySelector("#pd-fac-name").value || "My Facility", x: Game.state.x, y: Game.state.y }); Game.notify("Facility created", true); Game.renderProductionPanel(panel); } catch (e) { Game.notify(e.message); }
+      });
+    },
+
+    async renderBusinessPanel(panel = $("panel-business")) {
+      const [types, my] = await Promise.all([API.business.types(), API.business.my()]);
+      panel.innerHTML = `<h3>Businesses</h3>
+        <div class="form-row">
+          <input id="biz-name" placeholder="Business name"/>
+          <select id="biz-type">${(types.types||[]).map((t) => `<option value="${t}">${t}</option>`).join("")}</select>
+          <button class="btn" id="biz-create">Found ($${num(2000)})</button>
+        </div>
+        ${(my||[]).length?`<h4>My Businesses</h4><div class="table"><table><tr><th>Name</th><th>Type</th><th>Role</th><th>Facilities</th></tr>${
+          my.map((b) => `<tr><td>${b.name}</td><td>${b.type}</td><td>${b.role}</td><td>${(b.facilities||[]).map((f)=>`${f.kind}(${f.capacity})`).join(", ")}</td></tr>`).join("")
+        }</table></div>`:`<p>No businesses yet. Found one to coordinate production among members.</p>`}`;
+      panel.querySelector("#biz-create").addEventListener("click", async () => {
+        try { await API.business.create({ name: panel.querySelector("#biz-name").value, type: panel.querySelector("#biz-type").value }); Game.notify("Business founded!", true); await Game.renderBusinessPanel(panel); } catch (e) { Game.notify(e.message); }
+      });
+    },
+
+    async renderConstructionPanel(panel = $("panel-construction")) {
+      const [kinds, myProps] = await Promise.all([API.building.kinds(), API.building.myProperties()]);
+      panel.innerHTML = `<h3>Construction &amp; Property</h3>
+        <p>Buy land in regions, then build on it to raise your net worth and house production.</p>
+        <div class="form-row">
+          <select id="co-kind">${(kinds.kinds||[]).map((k) => `<option value="${k}">${k}</option>`).join("")}</select>
+          <input id="co-region" placeholder="regionKey (e.g. city)" />
+          <input id="co-name" placeholder="Name" />
+          <button class="btn" id="co-buy">Buy Property</button>
+        </div>
+        <h4>My Properties</h4>
+        <div class="table"><table><tr><th>Name</th><th>Kind</th><th>Region</th><th>Value</th></tr>${
+          (myProps||[]).map((p) => `<tr><td>${p.name}</td><td>${p.kind}</td><td>${p.regionKey}</td><td>$${num(p.value)}</td></tr>`).join("")
+        }</table></div>`;
+      panel.querySelector("#co-buy").addEventListener("click", async () => {
+        try { await API.building.buyProperty({ regionKey: panel.querySelector("#co-region").value, kind: panel.querySelector("#co-kind").value, name: panel.querySelector("#co-name").value, x: Game.state.x, y: Game.state.y }); Game.notify("Property bought", true); Game.renderConstructionPanel(panel); } catch (e) { Game.notify(e.message); }
+      });
+    },
+
+    async renderTransportPanel(panel = $("panel-transport")) {
+      const contracts = await API.transport.contracts();
+      panel.innerHTML = `<h3>Logistics &amp; Transport</h3>
+        <p>Accept delivery of your goods between regions for a reward.</p>
+        <div class="form-row">
+          <select id="tr-item">${Object.entries(DECOR).map(([k]) => `<option value="${k}">${k}</option>`).join("")}</select>
+          <input id="tr-qty" type="number" placeholder="Qty" min="1" value="1"/>
+          <input id="tr-from" placeholder="from region"/>
+          <input id="tr-to" placeholder="to region"/>
+          <button class="btn" id="tr-new">Start Contract</button>
+        </div>
+        <h4>My Contracts</h4>
+        <div class="table"><table><tr><th>Item</th><th>Route</th><th>Qty</th><th>Reward</th><th>Status</th><th></th></tr>${
+          (contracts||[]).map((c) => `<tr><td>${c.itemDef}</td><td>${c.fromRegion} → ${c.toRegion}</td><td>${c.quantity}</td><td>$${num(c.reward)}</td><td>${c.status}</td><td>${c.status==="ACCEPTED"?`<button class="btn tiny" data-deliver="${c.id}" data-region="${c.toRegion}">Deliver</button>`:""}</td></tr>`).join("")
+        }</table></div>`;
+      panel.querySelector("#tr-new").addEventListener("click", async () => {
+        try { await API.transport.contract({ itemDef: panel.querySelector("#tr-item").value, quantity: Number(panel.querySelector("#tr-qty").value), fromRegion: panel.querySelector("#tr-from").value, toRegion: panel.querySelector("#tr-to").value }); Game.notify("Contract started", true); Game.renderTransportPanel(panel); } catch (e) { Game.notify(e.message); }
+      });
+      panel.querySelectorAll("[data-deliver]").forEach((b) => b.addEventListener("click", async () => {
+        try { const r = await API.transport.deliverContract(b.dataset.deliver, Game.state.region); Game.notify("Delivered! +$" + num(r.reward), true); Game.refreshInventory(); Game.renderTransportPanel(panel); } catch (e) { Game.notify(e.message); }
+      }));
+    },
+
+    async renderPvpPanel(panel = $("panel-pvp")) {
+      const [rating, bounties] = await Promise.all([API.pvp.rating().catch(()=>({})), API.pvp.bountiesOnMe().catch(()=>[])]);
+      panel.innerHTML = `<h3>PvP &amp; Bounties</h3>
+        <div class="kv">Rating <b>${rating.pvpRating || 1000}</b> &middot; Kills <b>${rating.kills||0}</b> &middot; Deaths <b>${rating.deaths||0}</b></div>
+        <h4>Bounties on you</h4>
+        ${(bounties||[]).length?`<div class="table"><table><tr><th>Placed by</th><th>Amount</th></tr>${bounties.map((b)=>`<tr><td>${b.creator?.displayName||"?"}</td><td>$${num(b.amount)}</td></tr>`).join("")}</table></div>`:`<p>No active bounties on you.</p>`}
+        <h4>Place a Bounty</h4>
+        <div class="form-row">
+          <input id="pv-target" placeholder="target playerId"/>
+          <input id="pv-amt" type="number" placeholder="min 100"/>
+          <button class="btn" id="pv-place">Place Bounty</button>
+        </div>`;
+      panel.querySelector("#pv-place").addEventListener("click", async () => {
+        try { await API.pvp.bounty({ targetId: panel.querySelector("#pv-target").value, amount: Number(panel.querySelector("#pv-amt").value) }); Game.notify("Bounty placed", true); Game.renderPvpPanel(panel); } catch (e) { Game.notify(e.message); }
+      });
+    },
+
+    async renderCratesPanel(panel = $("panel-crates")) {
+      const crates = Game.state.crates || [];
+      panel.innerHTML = `<h3>Crates</h3>
+        <p>Open crates earned from exploration, milestones, PvP and admin events.</p>
+        <div class="table"><table><tr><th>Kind</th><th>Source</th><th></th></tr>${
+          (crates||[]).map((c) => `<tr><td>${c.kind}</td><td>${c.source}</td><td><button class="btn tiny" data-open="${c.id}">Open</button></td></tr>`).join("") || `<tr><td colspan="3">No crates.</td></tr>`
+        }</table></div>`;
+      panel.querySelectorAll("[data-open]").forEach((b) => b.addEventListener("click", async () => {
+        try { const r = await API.crates.open(b.dataset.open); const msg = r.coins?`+$${r.coins}`:`+${r.item.qty} x ${r.item.itemDef}`; Game.notify(`Opened ${r.kind}: ${msg}`, true); Game.refreshInventory(); Game.renderCratesPanel(panel); } catch (e) { Game.notify(e.message); }
+      }));
+    },
+
+    async renderSocialPanel(panel = $("panel-social")) {
+      const [friends, offers] = await Promise.all([API.social.friends(), API.social.offers()]);
+      panel.innerHTML = `<h3>Social &amp; Trade</h3>
+        <div class="form-row">
+          <input id="so-friend" placeholder="username"/>
+          <button class="btn" id="so-addfriend">Add Friend</button>
+          <input id="so-find" placeholder="display name to find id"/>
+          <button class="btn" id="so-findbtn">Find</button>
+        </div>
+        <h4>Friends</h4>
+        <div class="table"><table><tr><th>Name</th><th>Status</th><th></th></tr>${
+          (friends||[]).map((f) => `<tr><td>${f.name}</td><td>${f.status}</td><td>${f.status==="PENDING"&&f.direction==="incoming"?`<button class="btn tiny" data-accept="${f.friendId}">Accept</button>`:""}</td></tr>`).join("") || `<tr><td colspan="3">No friends.</td></tr>`
+        }</table></div>
+        <h4>Incoming Trade Offers</h4>
+        <div class="table"><table><tr><th>#</th><th>Status</th><th></th></tr>${
+          (offers||[]).map((o) => `<tr><td>${o.id.slice(0,8)}</td><td>${o.status}</td><td>${o.status==="PENDING"?`<button class="btn tiny" data-acc="${o.id}">Accept</button><button class="btn tiny" data-dec="${o.id}">Decline</button>`:""}</td></tr>`).join("")
+        }</table></div>`;
+      panel.querySelector("#so-addfriend").addEventListener("click", async () => { try { await API.social.addFriend({ username: panel.querySelector("#so-friend").value }); Game.notify("Request sent", true); Game.renderSocialPanel(panel); } catch (e) { Game.notify(e.message); } });
+      panel.querySelector("#so-findbtn").addEventListener("click", async () => { try { const p = await API.social.find(panel.querySelector("#so-find").value); Game.notify(`${p.displayName} = ${p.id}`); } catch (e) { Game.notify(e.message); } });
+      panel.querySelectorAll("[data-accept]").forEach((b) => b.addEventListener("click", async () => { await API.social.acceptFriend({ userId: b.dataset.accept }); Game.renderSocialPanel(panel); }));
+      panel.querySelectorAll("[data-acc]").forEach((b) => b.addEventListener("click", async () => { try { await API.social.acceptOffer(b.dataset.acc); Game.notify("Trade completed", true); Game.renderSocialPanel(panel); } catch (e) { Game.notify(e.message); } }));
+      panel.querySelectorAll("[data-dec]").forEach((b) => b.addEventListener("click", async () => { await API.social.declineOffer(b.dataset.dec); Game.renderSocialPanel(panel); }));
+    },
+
+    async renderLeaderboardsPanel(panel = $("panel-leaderboards")) {
+      const lb = await API.leaderboards();
+      const row = (arr, key, money) => (arr||[]).map((e, i) => `<tr><td>${e.rank||i+1}</td><td>${e.name}</td><td>${money?"$"+num(e[key] || e.netWorth):e[key||"value"]}</td></tr>`).join("");
+      panel.innerHTML = `<h3>Leaderboards</h3>
+        <h4>Richest Players</h4>
+        <div class="table"><table><tr><th>#</th><th>Name</th><th>Net Worth</th></tr>${row(lb.richest, "netWorth", true)}</table></div>
+        <h4>Top Produces</h4>
+        <div class="table"><table><tr><th>#</th><th>Name</th><th>Produced</th></tr>${row(lb.producers, "value")}</table></div>
+        <h4>Top Traders (sold)</h4>
+        <div class="table"><table><tr><th>#</th><th>Name</th><th>Sold</th></tr>${row(lb.traders, "value")}</table></div>
+        <h4>Highest Level</h4>
+        <div class="table"><table><tr><th>#</th><th>Name</th><th>Level</th></tr>${row(lb.grinders, "value")}</table></div>`;
+    },
+
+    async renderTransactionsPanel(panel = $("panel-transactions")) {
+      const tx = await API.economy.transactions();
+      panel.innerHTML = `<h3>Transactions</h3>
+        <div class="table"><table><tr><th>Type</th><th>Amount</th><th>Ref</th><th>Time</th></tr>${
+          (tx||[]).map((t) => `<tr><td>${t.type}</td><td>${t.senderId===VOIDORIA.player?.profile?.id?"-":"+"}$${num(t.amount)}</td><td>${t.reference||"•"}</td><td>${new Date(t.createdAt).toLocaleString()}</td></tr>`).join("")
+        }</table></div>`;
+    },
   };
 
   window.VOIDORIA = VOIDORIA;
 
-  // ---------- Auth boot ----------
-  async function boot() {
+  // Wire top-level flow controls at load (auth -> customize -> dashboard -> game).
+  Game.bindStaticUI();
+
+  // Boot: redirect to dashboard/game if already logged in.
+  (async function boot() {
     try {
-      const data = await API.auth.me();
-      if (!data.user) { showAuth(); return; }
-      state.user = data.user;
-      if (!data.player) {
-        // user exists but never customized
-        VOIDORIA.goCustomize(data.user);
-        return;
+      const me = await API.auth.me();
+      if (me.user) {
+        window.VOIDORIA.user = me.user;
+        VOIDORIA.showDashboard(me.user);
       }
-      VOIDORIA.showDashboard(data.user);
-    } catch (e) {
-      showAuth();
+    } catch (_) {
+      window.Auth.show();
     }
-  }
-
-  function showAuth() {
-    UI.authScreen.style.display = "flex";
-    UI.game.style.display = "none";
-    UI.customizeScreen.style.display = "none";
-    UI.dashboardScreen.style.display = "none";
-  }
-
-  // ---------- Profile load ----------
-  async function loadProfile() {
-    const p = await API.player.me();
-    state.profile = p.profile;
-    state.settings = p.settings;
-    state.levelXpNeed = p.profile.level * 100;
-  }
-
-  function renderDashboard() {
-    const p = state.profile;
-    if (!p) return;
-    $("#dash-name").textContent = p.displayName;
-    let coins = p.coins;
-    API.economy.bal().then((r) => {
-      coins = r.balance;
-      drawDashStats();
-    }).catch(() => drawDashStats());
-    function drawDashStats() {
-      $("#dash-stats").innerHTML = `
-        <div class="dash-stat"><div class="k">Balance</div><div class="v money">$${(coins || 0).toLocaleString()}</div></div>
-        <div class="dash-stat"><div class="k">Level</div><div class="v lvl">${p.level || 1}</div></div>
-        <div class="dash-stat"><div class="k">Kills</div><div class="v">${p.kills || 0}</div></div>
-        <div class="dash-stat"><div class="k">Deaths</div><div class="v">${p.deaths || 0}</div></div>
-        <div class="dash-stat span2"><div class="k">Dimension</div><div class="v">${escapeHtml(p.dimension || "overworld")}</div></div>
-      `;
-    }
-  }
-
-  // ---------- Engine ----------
-  function initEngine() {
-    const canvas = $("#game-canvas");
-    const engine = new window.VoxelEngine(canvas);
-    engine.init();
-    engine.position.x = state.profile.pos.x;
-    engine.position.y = state.profile.pos.y;
-    engine.position.z = state.profile.pos.z;
-    engine.resetDimension(state.profile.dimension);
-    state.engine = engine;
-    engine.startLoop();
-  }
-
-  // ---------- Socket ----------
-  function connectSocket() {
-    return new Promise((resolve) => {
-      const token = getCookie("session_token");
-      const socket = io({ auth: { token } });
-      state.socket = socket;
-      if (state.engine) state.engine.setSocket(socket);
-
-      socket.on("connect", () => {
-        state.connected = true;
-        socket.emit("move", { x: state.profile.pos.x, y: state.profile.pos.y, z: state.profile.pos.z, onGround: true });
-        // Request the initial chunks so terrain appears immediately, without
-        // waiting for the player to click to lock the pointer (which is what
-        // normally triggers the movement loop / streamChunks).
-        if (state.engine) {
-          state.engine.streamChunks();
-          setTimeout(() => state.engine.streamChunks(), 250);
-          setTimeout(() => state.engine.streamChunks(), 800);
-        }
-        resolve();
-      });
-
-      socket.on("connect_error", (err) => {
-        state.connected = false;
-        notice("Socket error: " + err.message, true);
-        resolve();
-      });
-
-      socket.on("world:init", (d) => {
-        state.engine.resetDimension(d.isVoid ? "void" : "overworld");
-        // The server corrects the spawn height to the actual surface, so snap
-        // to its position instead of our cached profile (which may be mid-air).
-        if (d.player && typeof d.player.x === "number") {
-          state.engine.position.x = d.player.x;
-          state.engine.position.y = d.player.y;
-          state.engine.position.z = d.player.z;
-        }
-        // The server confirms the session here; request the spawn area now and
-        // a few times over the next moments so terrain renders immediately even
-        // if the earlier connect-time request raced connection setup.
-        if (state.engine) {
-          state.engine.streamChunks();
-          setTimeout(() => state.engine.streamChunks(), 300);
-          setTimeout(() => state.engine.streamChunks(), 1000);
-        }
-      });
-
-      socket.on("chunk", (d) => state.engine.onChunk(d));
-      socket.on("chunk:unload", (d) => state.engine.onUnloadChunk(d));
-      socket.on("block:update", (d) => {
-        state.engine.onBlockUpdate(d);
-        if (d.block === 0 && d.prev === 21) { /* void shard mined */ }
-        refreshInventory();
-      });
-
-      socket.on("player:move", (d) => state.engine.updateOtherPlayer(d.id, d));
-      socket.on("player:join", (d) => addChat("sys", d.name + " joined the server"));
-      socket.on("player:leave", (d) => { state.engine.removeOtherPlayer(d.id); addChat("sys", "A player left"); });
-
-      socket.on("chat", (d) => addChat(d.name, d.message));
-
-      socket.on("forest", (d) => {});
-      socket.on("border", (d) => { state.engine.position.x = d.x; state.engine.position.z = d.z; });
-
-      socket.on("stats", (d) => updateHud(d));
-      socket.on("inventory:update", () => refreshInventory());
-
-      socket.on("teleport", (d) => state.engine.teleport(d));
-
-      socket.on("damage", (d) => {
-        updateHud({ health: d.health });
-        flashDamage();
-      });
-      socket.on("respawn", (d) => { state.engine.teleport(d); });
-
-      socket.on("void:hazard", (d) => {
-        if (Date.now() < voidProtectedUntil) return; // still shielded
-        notice("The Void consumes you!", "Void emergence!");
-        voidEmergency();
-      });
-      socket.on("void:protected", () => { voidProtectedUntil = Date.now() + 8000; notice("A Void Totem shields you!", "Protected"); });
-
-      socket.on("tp:request", (d) => {
-        pendingTp = d;
-        const el = $("#tp-prompt");
-        $("#tp-prompt-text").textContent = d.kind === "tpa"
-          ? (d.from + " wants to teleport to you.")
-          : (d.from + " wants to teleport you to them.");
-        el.style.display = "block";
-      });
-
-      socket.on("notification", (d) => notice(d.title, d.message));
-      socket.on("bounty:claimed", (d) => notice("Bounty!", d.killer + " claimed a bounty on " + d.target));
-      socket.on("fatal", (d) => { notice(d.error, "", true); });
-      socket.on("error", (d) => notice(d.error, "", true));
-    });
-  }
-
-  let pendingTp = null;
-  let voidProtectedUntil = 0;
-  $("#tp-accept").addEventListener("click", async () => {
-    if (!pendingTp) return;
-    pendingTp = null;
-    $("#tp-prompt").style.display = "none";
-    try { await API.teleport.tpaccept({ requestId: 0 }); } catch (e) {}
-  });
-  $("#tp-deny").addEventListener("click", async () => {
-    if (!pendingTp) return;
-    pendingTp = null;
-    $("#tp-prompt").style.display = "none";
-  });
-
-  // ---------- HUD ----------
-  function updateHud(d) {
-    if (d.health !== undefined) {
-      $("#bar-health").style.width = (d.health / (d.maxHealth || 20) * 100) + "%";
-      $("#health-num").textContent = Math.floor(d.health);
-    }
-    if (d.hunger !== undefined) {
-      $("#bar-hunger").style.width = (d.hunger / 20 * 100) + "%";
-      $("#hunger-num").textContent = Math.floor(d.hunger);
-    }
-    if (d.xp !== undefined && d.level !== undefined) {
-      const need = d.level * 100;
-      $("#bar-xp").style.width = (d.xp / need * 100) + "%";
-      $("#level-num").textContent = "Lv " + d.level;
-      state.levelXpNeed = need;
-    }
-    if (d.x !== undefined) {
-      const dim = d.dimension === "void" ? "Void" : "Overworld";
-      $("#hud-coords").textContent = Math.floor(d.x) + ", " + Math.floor(d.y) + ", " + Math.floor(d.z) + " · " + dim;
-    }
-    if (d.coins !== undefined) {
-      $("#hud-currency").textContent = "$" + Number(d.coins).toLocaleString();
-    }
-  }
-
-  function flashDamage() {
-    const el = document.createElement("div");
-    el.style.cssText = "position:fixed;inset:0;background:rgba(200,0,0,.35);z-index:7;pointer-events:none;transition:opacity .4s;";
-    document.body.appendChild(el);
-    setTimeout(() => { el.style.opacity = "0"; setTimeout(() => el.remove(), 400); }, 60);
-  }
-
-  // ---------- Hotbar / Inventory ----------
-  async function refreshInventory() {
-    try {
-      const data = await API.player.inventory();
-      state.inventory = data.inventory;
-      state.hotbar = new Array(9).fill(null);
-      for (const it of data.inventory) {
-        if (it.slot >= 0 && it.slot < 9) {
-          state.hotbar[it.slot] = { itemType: it.itemType, amount: it.amount };
-        }
-      }
-      renderHotbar();
-    } catch (e) {}
-  }
-
-  function renderHotbar() {
-    for (let i = 0; i < 9; i++) {
-      const slotEl = $(`.hotbar-slot[data-hotbar="${i}"]`);
-      slotEl.classList.toggle("active", state.selectedHotbar === i);
-      const item = state.hotbar[i];
-      let inner = "";
-      if (item) {
-        const color = BLOCK_COLORS[item.itemType] || "#777";
-        inner = `<div class="ic" style="background:${color};border-radius:4px;"></div>`;
-        slotEl.querySelector(".amt").textContent = item.amount || "";
-      } else {
-        inner = "";
-        slotEl.querySelector(".amt").textContent = "";
-      }
-      const ic = slotEl.querySelector(".ic");
-      if (ic) ic.remove();
-      if (inner) slotEl.insertAdjacentHTML("afterbegin", inner);
-    }
-  }
-
-  document.addEventListener("keydown", (e) => {
-    if (e.code.startsWith("Digit")) {
-      const n = Number(e.code.slice(5));
-      if (n >= 1 && n <= 9) { state.selectedHotbar = n - 1; renderHotbar(); }
-    }
-    if (e.code === "KeyE") toggleMenu();
-    if (e.code === "Escape") { if (UI.menuOverlay.style.display !== "none") closeMenu(); }
-  });
-
-  // ---------- Chat ----------
-  function addChat(name, message) {
-    const box = $("#chat-messages");
-    const row = document.createElement("div");
-    row.className = "msg";
-    if (name === "sys") { row.innerHTML = `<span class="sys">${escapeHtml(message)}</span>`; }
-    else { row.innerHTML = `<span class="name">${escapeHtml(name)}</span>: ${escapeHtml(message)}`; }
-    box.appendChild(row);
-    while (box.children.length > 40) box.removeChild(box.firstChild);
-  }
-
-  async function sendChat(text) {
-    if (text.startsWith("/")) {
-      await runCommand(text);
-      return;
-    }
-    if (state.socket && state.socket.connected) state.socket.emit("chat", { message: text });
-  }
-
-  async function runCommand(text) {
-    const parts = text.slice(1).trim().split(/\s+/);
-    const cmd = parts[0].toLowerCase();
-    try {
-      switch (cmd) {
-        case "bal": { const r = await API.economy.bal(); addChat("sys", `Your balance: $${r.balance.toLocaleString()}`); break; }
-        case "baltop": {
-          const r = await API.economy.baltop();
-          addChat("sys", baltopText(r.baltop)); break;
-        }
-        case "pay": {
-          if (parts.length < 3) return addChat("sys", "Usage: /pay <player> <amount>");
-          const r = await API.economy.pay({ username: parts[1], amount: Number(parts[2]) });
-          addChat("sys", r.message); break;
-        }
-        case "spawn": { const r = await API.teleport.spawn(); addChat("sys", r.message); break; }
-        case "rtp": { const r = await API.teleport.rtp(); addChat("sys", r.message); break; }
-        case "home": { const r = await API.teleport.home({ name: parts[1] || "home" }); addChat("sys", r.message); break; }
-        case "sethome": { await commandSethome(parts[1]); break; }
-        case "tpa": {
-          if (!parts[1]) return addChat("sys", "Usage: /tpa <player>");
-          const r = await API.teleport.tpa({ username: parts[1] }); addChat("sys", r.message); break;
-        }
-        case "tpahere": {
-          if (!parts[1]) return addChat("sys", "Usage: /tpahere <player>");
-          const r = await API.teleport.tpahere({ username: parts[1] }); addChat("sys", r.message); break;
-        }
-        case "shop": addChat("sys", "Open the Shop from the menu (E) or the Shop panel."); break;
-        case "ah": addChat("sys", "Open the Auction House from the menu (E)."); break;
-        case "bounty": {
-          if (!parts[1] || !parts[2]) return addChat("sys", "Usage: /bounty <player> <amount>");
-          const r = await API.player.placeBounty({ target: parts[1], amount: Number(parts[2]) });
-          addChat("sys", r.message); break;
-        }
-        case "bounties": { const r = await API.player.bounties(); addChat("sys", bountiesText(r.bounties)); break; }
-        case "void": { const r = await API.world.travel({ dimension: "void" }); addChat("sys", r.message); break; }
-        case "overworld": { const r = await API.world.travel({ dimension: "overworld" }); addChat("sys", r.message); break; }
-        case "help": {
-          addChat("sys", "Commands: /bal /pay /baltop /shop /ah /spawn /rtp /home /sethome /tpa /tpahere /bounty /bounties /void");
-          break;
-        }
-        case "sellall": addChat("sys", "Use the Shop panel to sell items."); break;
-        case "sell": addChat("sys", "Use the Shop panel to sell items."); break;
-        default: addChat("sys", "Unknown command. Try /help"); break;
-      }
-    } catch (err) {
-      addChat("sys", "Error: " + err.message);
-    }
-  }
-
-  async function commandSethome(name) {
-    const p = state.engine.position;
-    const dim = state.engine.currentDimension;
-    const r = await API.player.sethome({ name: name || "home", x: Math.floor(p.x), y: Math.floor(p.y), z: Math.floor(p.z), dimension: dim });
-    addChat("sys", r.message);
-  }
-
-  function baltopText(top) {
-    return "Baltop: " + top.map((t, i) => `${i + 1}. ${t.name} $${t.amount.toLocaleString()}`).join("  ");
-  }
-  function bountiesText(list) {
-    if (!list.length) return "No active bounties";
-    return "Bounties: " + list.map((b) => `${b.target} $${b.amount.toLocaleString()}`).join("  ");
-  }
-
-  // Chat visibility
-  let chatOpen = false;
-  const chatInput = $("#chat-input");
-  document.addEventListener("keydown", (e) => {
-    if (e.code === "KeyT" && !chatOpen && UI.menuOverlay.style.display === "none") {
-      chatOpen = true; chatInput.style.display = "block"; chatInput.focus();
-      document.exitPointerLock && document.exitPointerLock();
-    }
-  });
-  chatInput.addEventListener("keydown", async (e) => {
-    if (e.key === "Enter") {
-      const text = chatInput.value;
-      chatInput.value = "";
-      chatOpen = false; chatInput.style.display = "none";
-      if (UI.menuOverlay.style.display === "none") state.engine.lock();
-      if (text.trim()) await sendChat(text);
-    } else if (e.key === "Escape") {
-      chatOpen = false; chatInput.value = ""; chatInput.style.display = "none";
-      state.engine.lock();
-    }
-  });
-  $("#btn-chat-toggle").addEventListener("click", () => {
-    if (!chatOpen) { chatOpen = true; chatInput.style.display = "block"; chatInput.focus(); }
-  });
-
-  // ---------- Notifications ----------
-  function notice(title, message, isError) {
-    const box = $("#notifications");
-    const el = document.createElement("div");
-    el.className = "note" + (isError ? " error" : "");
-    el.innerHTML = title ? `<b>${escapeHtml(title)}</b>${message ? "<span>" + escapeHtml(message) + "</span>" : ""}` : escapeHtml(message);
-    box.appendChild(el);
-    setTimeout(() => { el.style.opacity = "0"; el.style.transition = "opacity .4s"; setTimeout(() => el.remove(), 400); }, 4200);
-    while (box.children.length > 6) box.removeChild(box.firstChild);
-  }
-
-  // ---------- Menu ----------
-  function toggleMenu() {
-    if (UI.menuOverlay.style.display === "none") {
-      activePanel = "inventory";
-      openMenu();
-    } else closeMenu();
-  }
-  async function openMenu() {
-    UI.menuOverlay.style.display = "flex";
-    document.exitPointerLock && document.exitPointerLock();
-    await renderActivePanel();
-    refreshInventory();
-  }
-  function closeMenu() {
-    UI.menuOverlay.style.display = "none";
-    state.engine.lock();
-  }
-
-  let activePanel = "profile";
-  $$(".mnav").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      $$(".mnav").forEach((b) => b.classList.remove("active"));
-      btn.classList.add("active");
-      activePanel = btn.dataset.panel;
-      $$(".panel").forEach((p) => p.classList.remove("active"));
-      $("#panel-" + activePanel).classList.add("active");
-      await renderPanel(activePanel);
-    });
-  });
-
-  async function renderActivePanel() {
-    $$(".panel").forEach((p) => p.classList.remove("active"));
-    $("#panel-" + activePanel).classList.add("active");
-    await renderPanel(activePanel);
-  }
-
-  const PANEL_RENDERERS = {
-    profile: renderProfile,
-    inventory: renderInventoryPanel,
-    shop: renderShop,
-    auction: renderAuction,
-    teleport: renderTeleport,
-    bounties: renderBounties,
-    homes: renderHomes,
-    friends: renderFriends,
-    settings: renderSettings,
-    stats: renderStats,
-    void: renderVoid,
-  };
-
-  async function renderPanel(name) {
-    const fn = PANEL_RENDERERS[name];
-    if (fn) await fn();
-  }
-
-  // ---------- Panels ----------
-  async function renderProfile() {
-    const p = state.profile;
-    const el = $("#panel-profile");
-    if (!p) {
-      el.innerHTML = `<h2>Player Profile</h2><p class="sub">Your identity in Voidoria</p><p class="muted">Profile not loaded yet. Try again in a moment.</p>`;
-      return;
-    }
-    el.innerHTML = `
-      <h2>Player Profile</h2>
-      <p class="sub">Your identity in Voidoria</p>
-      <div class="avatar-block">
-        <canvas id="profile-avatar" class="avatar-mini" width="64" height="64"></canvas>
-        <div>
-          <div class="grow"><strong>${escapeHtml(p.displayName)}</strong></div>
-          <div class="muted">Level ${p.level} · ${p.kills} kills · ${p.deaths} deaths</div>
-          <div class="muted">Dimension: ${p.dimension}</div>
-        </div>
-      </div>
-      <div class="field">
-        <input id="customize-edit" type="button" value="Edit Character">
-      </div>
-      <h3 style="margin-top:16px">Change Password</h3>
-      <div class="field"><input id="pw-cur" type="password" placeholder="Current password"></div>
-      <div class="field"><input id="pw-new" type="password" placeholder="New password"></div>
-      <button class="btn primary" id="btn-change-pw">Update Password</button>
-    `;
-    drawMiniAvatar(state.profile.appearance || {});
-    $("#customize-edit").addEventListener("click", () => {
-      UI.game.style.display = "none";
-      UI.menuOverlay.style.display = "none";
-      window.Customize.show();
-    });
-    $("#btn-change-pw").addEventListener("click", async () => {
-      try {
-        await API.auth.changePassword({ currentPassword: $("#pw-cur").value, newPassword: $("#pw-new").value });
-        notice("Password changed");
-      } catch (err) { notice("", err.message, true); }
-    });
-  }
-
-  function drawMiniAvatar(app) {
-    const c = document.createElement("canvas");
-    c.width = 64; c.height = 64;
-    const ctx = c.getContext("2d");
-    ctx.fillStyle = "#1a2050"; ctx.fillRect(0, 0, 64, 64);
-    ctx.fillStyle = app.skinTone || "#e0ac69"; ctx.fillRect(18, 8, 28, 18);
-    ctx.fillStyle = app.shirtColor || "#2e7d9a"; ctx.fillRect(16, 26, 32, 18);
-    ctx.fillStyle = app.hairColor || "#3b2a1a"; ctx.fillRect(18, 8, 28, 4);
-    ctx.fillStyle = app.pantsColor || "#3f4c66"; ctx.fillRect(18, 44, 12, 12); ctx.fillRect(34, 44, 12, 12);
-    swapCanvas("profile-avatar", c);
-  }
-
-  function swapCanvas(id, source) {
-    const target = document.getElementById(id);
-    if (!target) return;
-    const ctx = target.getContext("2d");
-    ctx.clearRect(0, 0, target.width, target.height);
-    ctx.drawImage(source, 0, 0, target.width, target.height);
-  }
-
-  async function renderInventoryPanel() {
-    const el = $("#panel-inventory");
-    const inv = state.inventory;
-    el.innerHTML = `<h2>Inventory</h2><p class="sub">${inv.length} stack(s)</p><div class="grid">` +
-      inv.map((it) => {
-        const color = BLOCK_COLORS[it.itemType] || "#777";
-        const name = state.catalog[it.itemType]?.name || it.itemType;
-        return `<div class="card"><h4>${icon(color)} ${escapeHtml(name)}</h4><div class="muted">x${it.amount}</div>
-          <div class="btn-row">
-            <button class="btn small primary" data-sell="${it.itemType}">Sell</button>
-            <button class="btn small ghost" data-list="${it.itemType}">AH</button>
-          </div></div>`;
-      }).join("") + `</div>`;
-
-    el.querySelectorAll("[data-sell]").forEach((b) => b.addEventListener("click", async () => {
-      const itemType = b.dataset.sell;
-      try { const r = await API.shop.sell({ itemType, quantity: await countOf(itemType) }); notice(r.message); refreshInventory(); }
-      catch (err) { notice("", err.message, true); }
-    }));
-    el.querySelectorAll("[data-list]").forEach((b) => b.addEventListener("click", () => {
-      state.auctionPrefill = b.dataset.list; switchTo("auction");
-    }));
-  }
-
-  async function countOf(itemType) {
-    const it = state.inventory.find((x) => x.itemType === itemType);
-    return it ? it.amount : 1;
-  }
-
-  function icon(color) {
-    return `<span style="display:inline-block;width:14px;height:14px;border-radius:3px;background:${color};vertical-align:-1px"></span>`;
-  }
-
-  async function renderShop() {
-    const el = $("#panel-shop");
-    el.innerHTML = `<h2>Voidoria Shop</h2><p class="sub">Prices are set by Voidoria and apply to everyone. Buy items from, or sell items to, the Shop.</p><div id="shop-body">Loading...</div>`;
-    try {
-      const data = await API.shop.all();
-      let html = `<div class="toolbar"><select id="shop-cat"><option value="">All Categories</option>${data.categories.map((c) => `<option value="${c.id}">${c.name}</option>`).join("")}</select></div>`;
-      html += data.categories.map((cat) => `
-        <div class="shop-cat" data-cat="${cat.id}">
-          <h3>${escapeHtml(cat.name)}</h3><div class="grid">
-          ${cat.items.map((it) => `
-            <div class="card">
-              <h4>${icon(BLOCK_COLORS[it.itemType] || "#777")} ${escapeHtml(it.displayName)}</h4>
-              <div class="muted">${it.buyPrice >= 0 ? `Buy $${it.buyPrice.toLocaleString()}` : "Not for sale"} · ${it.sellPrice >= 0 ? `Sell $${it.sellPrice.toLocaleString()}` : "Not sellable"}${it.stock != null ? ` · Stock: ${it.stock}` : ""}</div>
-              <div class="btn-row">
-                ${it.buyPrice >= 0 ? `<button class="btn small primary" data-buy="${it.itemType}">Buy</button>` : ""}
-                ${it.sellPrice >= 0 ? `<button class="btn small ghost" data-sell="${it.itemType}">Sell</button>` : ""}
-              </div>
-            </div>`).join("")}
-          </div></div>`).join("");
-      el.querySelector("#shop-body").innerHTML = html;
-      $("#shop-cat").addEventListener("change", (e) => {
-        $$(".shop-cat").forEach((s) => { s.style.display = (s.dataset.cat === e.target.value || !e.target.value) ? "" : "none"; });
-      });
-      el.querySelectorAll("[data-buy]").forEach((b) => b.addEventListener("click", () => buyItem(b.dataset.buy)));
-      el.querySelectorAll("[data-sell]").forEach((b) => b.addEventListener("click", () => sellItem(b.dataset.sell)));
-    } catch (err) {
-      el.querySelector("#shop-body").innerHTML = `<div class="muted">Failed to load shop: ${escapeHtml(err.message)}</div>`;
-    }
-  }
-
-  async function buyItem(itemType) {
-    try { const r = await API.shop.buy({ itemType, quantity: 1 }); notice(r.message); refreshHud(); refreshInventory(); }
-    catch (err) { notice("", err.message, true); }
-  }
-  async function sellItem(itemType) {
-    try { const r = await API.shop.sellall({ itemType }); notice(r.message); refreshHud(); refreshInventory(); }
-    catch (err) { notice("", err.message, true); }
-  }
-  async function refreshHud() {
-    try { const r = await API.economy.bal(); $("#hud-currency").textContent = "$" + r.balance.toLocaleString(); } catch (e) {}
-  }
-
-  async function renderAuction() {
-    const el = $("#panel-auction");
-    el.innerHTML = `<h2>Auction House</h2><p class="sub">Player-to-player sales. List items, browse, and buy from other players.</p>
-      <div class="ah-list-form">
-        <h3>List an item</h3>
-        <div class="field">
-          <input id="ah-item" placeholder="Item ID (e.g. block:diamond)" value="${escapeHtml(state.auctionPrefill || "")}">
-          <input id="ah-qty" type="number" min="1" placeholder="Qty" style="width:70px">
-          <input id="ah-price" type="number" min="1" placeholder="Price $" style="width:110px">
-          <button class="btn primary" id="ah-list">List</button>
-        </div>
-      </div>
-      <div class="toolbar">
-        <input id="ah-search" placeholder="Search...">
-        <select id="ah-category"><option value="">All Categories</option></select>
-        <select id="ah-sort">
-          <option value="newest">Newest</option>
-          <option value="cheapest">Cheapest</option>
-          <option value="highest">Highest</option>
-        </select>
-        <label class="chk"><input type="checkbox" id="ah-mine"> My Listings</label>
-        <button class="btn small primary" id="ah-refresh">Refresh</button>
-      </div>
-      <div id="ah-body">Loading...</div>`;
-    $("#ah-list").addEventListener("click", listAuctionItem);
-    $("#ah-refresh").addEventListener("click", loadAuction);
-    $("#ah-search").addEventListener("input", debounce(loadAuction, 300));
-    $("#ah-category").addEventListener("change", loadAuction);
-    $("#ah-sort").addEventListener("change", loadAuction);
-    $("#ah-mine").addEventListener("change", loadAuction);
-    try {
-      const cats = await API.auction.categories();
-      $("#ah-category").innerHTML = `<option value="">All Categories</option>` + cats.categories.map((c) => `<option value="${c}">${c}</option>`).join("");
-    } catch (_) {}
-    await loadAuction();
-  }
-
-  async function listAuctionItem() {
-    const itemType = $("#ah-item").value.trim();
-    const quantity = Number($("#ah-qty").value);
-    const price = Number($("#ah-price").value);
-    try {
-      const r = await API.auction.list({ itemType, quantity, price });
-      notice(r.message);
-      refreshInventory();
-      loadAuction();
-    } catch (err) { notice("", err.message, true); }
-  }
-
-  async function loadAuction() {
-    const el = $("#ah-body");
-    if (!el) return;
-    const search = $("#ah-search") ? $("#ah-search").value : "";
-    const category = $("#ah-category") ? $("#ah-category").value : "";
-    const sort = $("#ah-sort") ? $("#ah-sort").value : "newest";
-    const mine = $("#ah-mine") ? $("#ah-mine").checked : false;
-    try {
-      const q = new URLSearchParams();
-      if (search) q.set("search", search);
-      if (category) q.set("category", category);
-      q.set("sort", sort);
-      if (mine) q.set("mine", "1");
-      const data = await API.auction.all(q.toString() ? "?" + q.toString() : "");
-      el.innerHTML = data.listings.length
-        ? `<div class="list">${data.listings.map((l) => `
-            <div class="list-item">
-              <div class="grow">
-                <strong>${escapeHtml(l.name)}</strong> x${l.quantity}
-                <div class="muted">${l.status === "ACTIVE" ? "Seller: " + escapeHtml(l.seller) : escapeHtml(l.status) + (l.buyer ? " · Bought by " + escapeHtml(l.buyer) : "")}</div>
-              </div>
-              <div class="price">$${l.price.toLocaleString()}</div>
-              ${(mine && l.status === "ACTIVE")
-                ? `<button class="btn small ghost" data-cancel="${l.id}">Cancel</button>`
-                : (!mine && l.status === "ACTIVE" && !l.mine
-                  ? `<button class="btn small primary" data-buy="${l.id}">Buy</button>`
-                  : "")}
-            </div>`).join("")}</div>`
-        : `<div class="muted">No listings found.</div>`;
-      el.querySelectorAll("[data-buy]").forEach((b) => b.addEventListener("click", () => buyAuction(b.dataset.buy)));
-      el.querySelectorAll("[data-cancel]").forEach((b) => b.addEventListener("click", () => cancelAuction(b.dataset.cancel)));
-    } catch (err) { el.innerHTML = `<div class="muted">${escapeHtml(err.message)}</div>`; }
-  }
-
-  async function buyAuction(id) {
-    try { const r = await API.auction.buy({ listingId: id }); notice(r.message); refreshHud(); refreshInventory(); loadAuction(); }
-    catch (err) { notice("", err.message, true); }
-  }
-  async function cancelAuction(id) {
-    try { const r = await API.auction.cancel({ listingId: id }); notice(r.message); refreshInventory(); loadAuction(); }
-    catch (err) { notice("", err.message, true); }
-  }
-
-  async function renderTeleport() {
-    const el = $("#panel-teleport");
-    el.innerHTML = `<h2>Teleportation</h2><p class="sub">Move around Voidoria instantly.</p>
-      <div class="field" style="flex-direction:column;gap:8px;align-items:stretch">
-        <button class="btn primary" id="tp-spawn">Go to Spawn</button>
-        <button class="btn primary" id="tp-rtp">Random Teleport (RTP)</button>
-      </div>
-      <h3 style="margin-top:14px">TPA</h3>
-      <div class="field"><input id="tpa-user" placeholder="Player name"><button class="btn primary" id="tpa-send">TPA</button></div>
-      <div class="field"><input id="tpahere-user" placeholder="Player name"><button class="btn primary" id="tpahere-send">TPAHere</button></div>
-      <h3 style="margin-top:14px">Stasis Chambers</h3>
-      <div id="stasis-list">Loading...</div>`;
-    $("#tp-spawn").addEventListener("click", async () => { try { const r = await API.teleport.spawn(); notice(r.message); } catch (e) { notice("", e.message, true); } });
-    $("#tp-rtp").addEventListener("click", async () => { try { const r = await API.teleport.rtp(); notice(r.message); } catch (e) { notice("", e.message, true); } });
-    $("#tpa-send").addEventListener("click", async () => { try { const r = await API.teleport.tpa({ username: $("#tpa-user").value }); notice(r.message); } catch (e) { notice("", e.message, true); } });
-    $("#tpahere-send").addEventListener("click", async () => { try { const r = await API.teleport.tpahere({ username: $("#tpahere-user").value }); notice(r.message); } catch (e) { notice("", e.message, true); } });
-    renderStasis();
-  }
-
-  async function renderStasis() {
-    const box = $("#stasis-list");
-    if (!box) return;
-    try {
-      const data = await API.stasis.all();
-      box.innerHTML = `<button class="btn small primary" id="stasis-place">Place Chamber Here</button><div class="list" style="margin-top:10px">` +
-        data.chambers.map((c) => `
-          <div class="list-item"><div class="grow"><strong>${escapeHtml(c.name)}</strong><div class="muted">${c.dimension}</div></div>
-            <div class="muted">${c.active ? "Active" : "Inactive"}</div>
-            <button class="btn small ghost" data-tog="${c.id}">${c.active ? "Deactivate" : "Activate"}</button>
-            <input class="stasis-target" data-id="${c.id}" placeholder="Pull player" style="width:120px">
-            <button class="btn small primary" data-pull="${c.id}">Pull</button>
-          </div>`).join("") + `</div>`;
-      $("#stasis-place").addEventListener("click", async () => {
-        const p = state.engine.position;
-        try { const r = await API.stasis.place({ x: Math.floor(p.x), y: Math.floor(p.y), z: Math.floor(p.z), dimension: state.engine.currentDimension }); notice(r.message); renderStasis(); } catch (e) { notice("", e.message, true); }
-      });
-      box.querySelectorAll("[data-tog]").forEach((b) => b.addEventListener("click", async () => { try { const r = await API.stasis.toggle({ id: b.dataset.tog }); notice(r.message); renderStasis(); } catch (e) { notice("", e.message, true); } }));
-      box.querySelectorAll("[data-pull]").forEach((b) => b.addEventListener("click", async () => {
-        const target = box.querySelector(`.stasis-target[data-id="${b.dataset.pull}"]`).value;
-        if (!target) return notice("", "Enter a player name to pull");
-        // resolve username -> id via a small lookup: reuse friends req error path as id? we need id. Use chat not feasible. Use a known global map or attempt by name via API.
-        pullByName(b.dataset.pull, target);
-      }));
-    } catch (err) { box.innerHTML = `<div class="muted">${escapeHtml(err.message)}</div>`; }
-  }
-
-  async function pullByName(chamberId, targetName) {
-    try {
-      const r = await API.stasis.pull({ id: chamberId, targetName });
-      if (r && r.pulled) {
-        notice("", r.message || "Player pulled");
-        renderStasis();
-      }
-    } catch (e) {
-      notice("", e.message, true);
-      renderStasis();
-    }
-  }
-
-  async function renderBounties() {
-    const el = $("#panel-bounties");
-    el.innerHTML = `<h2>Bounties</h2><p class="sub">Place a reward on another player's head.</p>
-      <div class="field"><input id="bounty-target" placeholder="Target player"><input id="bounty-amount" type="number" placeholder="Amount $"><button class="btn primary" id="bounty-place">Place Bounty</button></div>
-      <div id="bounty-list">Loading...</div>`;
-    $("#bounty-place").addEventListener("click", async () => {
-      try { const r = await API.player.placeBounty({ target: $("#bounty-target").value, amount: Number($("#bounty-amount").value) }); notice(r.message); loadBounties(); refreshHud(); } catch (e) { notice("", e.message, true); }
-    });
-    await loadBounties();
-  }
-  async function loadBounties() {
-    const box = $("#bounty-list");
-    if (!box) return;
-    try {
-      const data = await API.player.bounties();
-      box.innerHTML = data.bounties.length
-        ? `<div class="list">${data.bounties.map((b) => `<div class="list-item"><div class="grow"><strong>${escapeHtml(b.target)}</strong><div class="muted">by ${escapeHtml(b.creator)}</div></div><div class="price">$${b.amount.toLocaleString()}</div></div>`).join("")}</div>`
-        : `<div class="muted">No active bounties.</div>`;
-    } catch (err) { box.innerHTML = `<div class="muted">${escapeHtml(err.message)}</div>`; }
-  }
-
-  async function renderHomes() {
-    const el = $("#panel-homes");
-    el.innerHTML = `<h2>Homes</h2><p class="sub">Set teleport homes anywhere in the world.</p>
-      <div class="field"><input id="home-name" placeholder="home name"><button class="btn primary" id="home-set">Set Home</button></div>
-      <div id="home-list">Loading...</div>`;
-    $("#home-set").addEventListener("click", async () => {
-      const p = state.engine.position;
-      try { const r = await API.player.sethome({ name: $("#home-name").value || "home", x: Math.floor(p.x), y: Math.floor(p.y), z: Math.floor(p.z), dimension: state.engine.currentDimension }); notice(r.message); loadHomes(); } catch (e) { notice("", e.message, true); }
-    });
-    await loadHomes();
-  }
-  async function loadHomes() {
-    const box = $("#home-list");
-    if (!box) return;
-    try {
-      const data = await API.player.homes();
-      box.innerHTML = data.homes.length
-        ? `<div class="list">${data.homes.map((h) => `<div class="list-item"><div class="grow"><strong>${escapeHtml(h.name)}</strong><div class="muted">${Math.floor(h.x)}, ${Math.floor(h.y)}, ${Math.floor(h.z)} · ${h.dimension}</div></div>
-          <button class="btn small primary" data-tp="${escapeHtml(h.name)}">TP</button>
-          <button class="btn small ghost" data-del="${escapeHtml(h.name)}">Del</button></div>`).join("")}</div>`
-        : `<div class="muted">No homes set. Use /sethome or "Set Home" above.</div>`;
-      box.querySelectorAll("[data-tp]").forEach((b) => b.addEventListener("click", async () => { try { const r = await API.teleport.home({ name: b.dataset.tp }); notice(r.message); } catch (e) { notice("", e.message, true); } }));
-      box.querySelectorAll("[data-del]").forEach((b) => b.addEventListener("click", async () => { try { await API.player.delhome({ name: b.dataset.del }); loadHomes(); } catch (e) {} }));
-    } catch (err) { box.innerHTML = `<div class="muted">${escapeHtml(err.message)}</div>`; }
-  }
-
-  async function renderFriends() {
-    const el = $("#panel-friends");
-    el.innerHTML = `<h2>Friends</h2><p class="sub">Connect with other survivors.</p>
-      <div class="field"><input id="friend-name" placeholder="Username"><button class="btn primary" id="friend-add">Add Friend</button></div>
-      <div id="friend-list">Loading...</div>`;
-    $("#friend-add").addEventListener("click", async () => {
-      try { const r = await API.player.friendRequest({ username: $("#friend-name").value }); notice(r.message); loadFriends(); } catch (e) { notice("", e.message, true); }
-    });
-    await loadFriends();
-  }
-  async function loadFriends() {
-    const box = $("#friend-list");
-    if (!box) return;
-    try {
-      const data = await API.player.friends();
-      box.innerHTML = `<h4>Friends</h4>` + (data.friends.length ? `<div class="list">${data.friends.map((f) => `<div class="list-item"><strong>${escapeHtml(f.username)}</strong></div>`).join("")}</div>` : `<div class="muted">No friends yet.</div>`)
-        + `<h4 style="margin-top:12px">Incoming requests</h4>` + (data.incoming.length ? `<div class="list">${data.incoming.map((f) => `<div class="list-item"><div class="grow">${escapeHtml(f.username)}</div><button class="btn small primary" data-accept="${f.id}">Accept</button></div>`).join("")}</div>` : `<div class="muted">None</div>`)
-        + `<h4 style="margin-top:12px">Outgoing</h4>` + (data.outgoing.length ? `<div class="muted">${data.outgoing.map(escapeHtml).join(", ")}</div>` : `<div class="muted">None</div>`);
-      box.querySelectorAll("[data-accept]").forEach((b) => b.addEventListener("click", async () => { try { await API.player.friendRespond({ id: b.dataset.accept, accept: true }); loadFriends(); } catch (e) {} }));
-    } catch (err) { box.innerHTML = `<div class="muted">${escapeHtml(err.message)}</div>`; }
-  }
-
-  async function renderSettings() {
-    const el = $("#panel-settings");
-    el.innerHTML = `<h2>Settings</h2><p class="sub">Your preferences, persisted to the server.</p><div id="settings-body">Loading...</div>`;
-    const data = await API.player.settings();
-    const rows = [
-      ["allowTpa", "Allow TPA requests", state.settings?.allowTpa ?? true],
-      ["allowTpaHere", "Allow TPAHere requests", state.settings?.allowTpaHere ?? true],
-      ["autoAcceptTpa", "Auto-accept TPA", state.settings?.autoAcceptTpa ?? false],
-      ["autoAcceptTpaHere", "Auto-accept TPAHere", state.settings?.autoAcceptTpaHere ?? false],
-      ["chatVisible", "Show chat", state.settings?.chatVisible ?? true],
-      ["chatNotifications", "Chat notifications", state.settings?.chatNotifications ?? true],
-      ["showScoreboard", "Show scoreboard", state.settings?.showScoreboard ?? true],
-      ["notifications", "Notifications", state.settings?.notifications ?? true],
-    ];
-    el.querySelector("#settings-body").innerHTML = rows.map(([k, label, val]) => `
-      <div class="setting-row"><span class="lbl">${label}</span>
-        <label class="switch"><input type="checkbox" data-k="${k}" ${val ? "checked" : ""}><span class="slider"></span></label>
-      </div>`).join("");
-    el.querySelectorAll("[data-k]").forEach((c) => c.addEventListener("change", async (e) => {
-      try {
-        await API.player.updateSettings({ [e.target.dataset.k]: e.target.checked });
-        if (e.target.dataset.k === "allowTpa" || e.target.dataset.k === "allowTpaHere") {
-          state.settings = await API.player.settings();
-        }
-        notice("Setting saved");
-      } catch (err) { notice("", err.message, true); }
-    }));
-  }
-
-  async function renderStats() {
-    const el = $("#panel-stats");
-    const r = await API.player.stats();
-    const lb = await API.player.leaderboard();
-    el.innerHTML = `<h2>Stats</h2><p class="sub">Your progress and the server leaderboard.</p>
-      ${statLine("Level", r.level)}${statLine("Experience", `${r.xp} / ${r.nextXp}`)}
-      ${statLine("Health", `${Math.floor(r.health)} / 20`)}${statLine("Hunger", `${Math.floor(r.hunger)} / 20`)}
-      ${statLine("Kills", r.kills)}${statLine("Deaths", r.deaths)}${statLine("Balance", "$" + r.coins.toLocaleString())}
-      <h3 style="margin-top:16px">Wealth Leaderboard</h3>
-      ${lb.byCoins.map((t, i) => statLine(`${i + 1}. ${t.name}`, "$" + t.amount.toLocaleString())).join("")}
-      <h3 style="margin-top:16px">Level Leaderboard</h3>
-      ${lb.byLevel.map((t, i) => statLine(`${i + 1}. ${t.displayName}`, `Lv ${t.level}`)).join("")}`;
-  }
-  function statLine(k, v) { return `<div class="stat-line"><span class="k">${k}</span><span class="v">${v}</span></div>`; }
-
-  async function renderVoid() {
-    const el = $("#panel-void");
-    el.innerHTML = `<h2>The Void</h2><p class="sub">A separate dimension of eternal dusk and valuable resources.</p>
-      <div class="card"><h4>Void Shards</h4><p class="muted">Mine Void Shard Ore in The Void to obtain Void Shards.</p></div>
-      <div class="card"><h4>Void Totems</h4><p class="muted">Craft 8 Void Shards + 1 Diamond into a Void Totem. Keep it in your offhand to survive Void hazards. Normal protection does not work in the Void.</p>
-        <div class="btn-row"><button class="btn small primary" id="craft-totem">Craft Void Totem</button></div>
-      </div>
-      <div class="card"><h4>Travel</h4><p class="muted">Use /void to enter or /overworld to return. A Void Totem is required to survive entry.</p></div>
-      <h3 style="margin-top:14px">Crafting Recipes</h3><div id="void-recipes"></div>`;
-    $("#craft-totem").addEventListener("click", async () => {
-      try { const r = await API.world.craft({ recipe: "void_totem" }); notice(r.message); refreshInventory(); } catch (e) { notice("", e.message, true); }
-    });
-    const rec = $("#void-recipes");
-    const catalog = state.catalog;
-    rec.innerHTML = Object.entries(state.catalog ? { void_totem: { name: "Void Totem", result: "item:void_totem", cost: { "item:void_shard": 8, "item:diamond": 1 } } } : {}).map(([id, r]) =>
-      `<div class="card"><h4>${r.name}</h4><div class="muted">${Object.entries(r.cost).map(([it, n]) => `${(catalog[it]?.name || it)} x${n}`).join(" + ")} → ${(catalog[r.result]?.name || r.result)}</div></div>`).join("") || `<div class="muted">Recipes available.</div>`;
-  }
-
-  // ---------- menu/logout buttons ----------
-  $("#btn-menu").addEventListener("click", openMenu);
-  $("#btn-close-menu").addEventListener("click", closeMenu);
-  $("#btn-logout").addEventListener("click", logout);
-
-  $("#customize-play").addEventListener("click", async () => {
-    const msg = $("#customize-msg");
-    try {
-      const appearance = window.Customize.getState();
-      await API.player.appearance({ appearance });
-      msg.textContent = "";
-      msg.className = "form-msg";
-      // ensure a profile exists (should already), then land on the dashboard
-      await API.player.me();
-      await VOIDORIA.showDashboard(state.user);
-    } catch (err) {
-      msg.textContent = err.message;
-      msg.className = "form-msg";
-    }
-  });
-
-  // ---------- dashboard buttons ----------
-  function logout() {
-    state.socket && state.socket.disconnect();
-    state.engine && state.engine.dispose();
-    try { API.auth.logout(); } catch (e) {}
-    state.profile = null; state.inventory = []; state.hotbar = [];
-    UI.game.style.display = "none";
-    UI.menuOverlay.style.display = "none";
-    UI.dashboardScreen.style.display = "none";
-    showAuth();
-  }
-  $("#dashboard-play").addEventListener("click", () => VOIDORIA.enterGame(state.user));
-  $("#dashboard-customize").addEventListener("click", () => {
-    UI.dashboardScreen.style.display = "none";
-    window.Customize.show();
-  });
-  $("#dashboard-logout").addEventListener("click", logout);
-
-  // ---------- helpers ----------
-  function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
-  function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
-  function getCookie(name) { const m = document.cookie.match(new RegExp("(?:^|; )" + name + "=([^;]*)")); return m ? decodeURIComponent(m[1]) : null; }
-  function switchTo(panel) {
-    const btn = $$(".mnav").find((b) => b.dataset.panel === panel);
-    if (btn) btn.click();
-  }
-
-  // void emergency: consume a Void Totem to shield against the Void
-  function voidEmergency() {
-    state.socket.emit("use", { itemType: "item:void_totem" });
-    voidProtectedUntil = Date.now() + 1500; // wait for server confirmation
-  }
-
-  boot();
+  })();
 })();

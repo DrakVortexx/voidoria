@@ -1,85 +1,101 @@
 const prisma = require("../db");
-const { getItem } = require("../world/items");
+const { getItem, BY_ID } = require("../game/items");
+
+const INVENTORY_CAPACITY = 40; // max unique stacks
 
 async function getInventory(playerId) {
-  const rows = await prisma.inventorySlot.findMany({
-    where: { playerId },
-    orderBy: { slot: "asc" },
-  });
-  return rows;
+  return prisma.inventoryStack.findMany({ where: { playerId }, orderBy: { updatedAt: "asc" } });
 }
 
-async function countItem(playerId, itemType) {
-  const agg = await prisma.inventorySlot.aggregate({
-    where: { playerId, itemType },
-    _sum: { amount: true },
-  });
+async function countItem(playerId, itemDef) {
+  const agg = await prisma.inventoryStack.aggregate({ where: { playerId, itemDef }, _sum: { amount: true } });
   return agg._sum.amount || 0;
 }
 
-async function hasItem(playerId, itemType, amount = 1) {
-  return (await countItem(playerId, itemType)) >= amount;
+async function hasItem(playerId, itemDef, amount = 1) {
+  return (await countItem(playerId, itemDef)) >= amount;
 }
 
-async function removeItem(playerId, itemType, amount, { tx } = {}) {
+// Remove `amount` of an item, preferring lower-quality stacks first (FIFO-ish).
+async function removeItem(playerId, itemDef, amount, { tx } = {}) {
   const c = tx || prisma;
   let remaining = amount;
-  const rows = await c.inventorySlot.findMany({
-    where: { playerId, itemType, amount: { gt: 0 } },
-    orderBy: { slot: "asc" },
+  const rows = await c.inventoryStack.findMany({
+    where: { playerId, itemDef, amount: { gt: 0 } },
+    orderBy: [{ quality: "asc" }, { updatedAt: "asc" }],
   });
   for (const row of rows) {
     if (remaining <= 0) break;
     const take = Math.min(row.amount, remaining);
     if (row.amount - take <= 0) {
-      await c.inventorySlot.delete({ where: { id: row.id } });
+      await c.inventoryStack.delete({ where: { id: row.id } });
     } else {
-      await c.inventorySlot.update({ where: { id: row.id }, data: { amount: row.amount - take } });
+      await c.inventoryStack.update({ where: { id: row.id }, data: { amount: row.amount - take } });
     }
     remaining -= take;
   }
-  if (remaining > 0) {
-    throw new Error("Not enough items");
-  }
+  if (remaining > 0) throw new Error("Not enough items");
 }
 
-async function firstEmptySlot(playerId) {
-  const rows = await prisma.inventorySlot.findMany({ where: { playerId }, select: { slot: true } });
-  const used = new Set(rows.map((r) => r.slot));
-  for (let s = 0; s < 36; s++) if (!used.has(s)) return s;
-  return null;
-}
-
-async function addItem(playerId, itemType, amount, { durability = 0, metadata = {}, tx } = {}) {
+// Add an item. Stacks onto existing stacks of the same def+quality (when it is
+// a stackable commodity) or creates a new stack. Equipment/tools (stack:1) each
+// get their own stack to preserve quality/durability/creator metadata.
+async function addItem(playerId, itemDef, amount, { quality = 1, durability = 1, metadata = {}, tx } = {}) {
   const c = tx || prisma;
-  const def = getItem(itemType);
-  const stack = def ? def.stack : 64;
+  const def = getItem(itemDef);
+  if (!def) throw new Error("Unknown item");
+  const stack = def.stack || 64;
+  if (amount <= 0) return;
   let remaining = amount;
 
-  // stack onto existing non-full stacks of same item+stats
-  const existing = await c.inventorySlot.findMany({
-    where: { playerId, itemType, amount: { lt: stack } },
-    orderBy: { slot: "asc" },
-  });
-  for (const row of existing) {
-    if (remaining <= 0) break;
-    if (row.durability !== (durability || 0)) continue;
-    const space = stack - row.amount;
-    const put = Math.min(space, remaining);
-    await c.inventorySlot.update({ where: { id: row.id }, data: { amount: row.amount + put } });
-    remaining -= put;
+  if (stack > 1 && quality >= 1) {
+    // commodity: fold into existing compatible stacks
+    const existing = await c.inventoryStack.findMany({
+      where: { playerId, itemDef, amount: { lt: stack }, quality, durability },
+    });
+    for (const row of existing) {
+      if (remaining <= 0) break;
+      const space = stack - row.amount;
+      const put = Math.min(space, remaining);
+      await c.inventoryStack.update({ where: { id: row.id }, data: { amount: row.amount + put } });
+      remaining -= put;
+    }
   }
 
   while (remaining > 0) {
-    const slot = await firstEmptySlot(playerId);
-    if (slot === null) throw new Error("Inventory full");
+    const count = await c.inventoryStack.count({ where: { playerId } });
+    if (count >= INVENTORY_CAPACITY) throw new Error("Inventory full");
     const put = Math.min(stack, remaining);
-    await c.inventorySlot.create({
-      data: { playerId, slot, itemType, amount: put, durability: durability || 0, metadata: metadata || {} },
+    await c.inventoryStack.create({
+      data: { playerId, itemDef, amount: put, quality, durability, metadata: metadata || {} },
     });
     remaining -= put;
   }
   return true;
 }
 
-module.exports = { getInventory, countItem, hasItem, removeItem, addItem, firstEmptySlot };
+// Value of inventory at base market value (for net worth). Only counts
+// non-equipment, non-crate items that have real value.
+async function inventoryWorth(playerId) {
+  const inv = await getInventory(playerId);
+  let total = 0;
+  for (const s of inv) {
+    const def = BY_ID[s.itemDef];
+    if (!def) continue;
+    if (def.type === "crate") continue;
+    // Asset value at 60% of base value to be conservative and avoid exploits.
+    const effective = Math.floor(def.baseValue * 0.6 * s.quality);
+    total += effective * s.amount;
+  }
+  return total;
+}
+
+// Consume a stackable item (e.g. eating food). Returns true/false.
+async function consume(playerId, itemDef, qty = 1) {
+  const has = await countItem(playerId, itemDef);
+  if (has < qty) return false;
+  await removeItem(playerId, itemDef, qty);
+  return true;
+}
+
+module.exports = { getInventory, countItem, hasItem, removeItem, addItem, inventoryWorth, consume, INVENTORY_CAPACITY };

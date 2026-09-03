@@ -1,14 +1,13 @@
 {
   "name": "voidoria",
-  "version": "1.0.0",
-  "description": "Voidoria - an original multiplayer voxel sandbox survival and economy game",
+  "version": "1.1.0",
+  "description": "Voidoria - an open-world multiplayer economy MMO. Explore, craft, trade, and build your empire.",
   "main": "server/index.js",
   "scripts": {
     "start": "node server/index.js",
     "postinstall": "prisma generate",
     "dev": "node --watch server/index.js",
-    "game:test": "node tests/terrain.test.js",
-    "chunk:test": "node tests/chunk.stream.test.js",
+    "test": "node tests/game.test.js",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:seed": "node prisma/seed.js",

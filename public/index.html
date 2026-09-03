@@ -3,46 +3,41 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="description" content="Voidoria - an original multiplayer voxel sandbox survival and economy game. Build, explore, trade, and brave The Void." />
+  <meta name="description" content="Voidoria - an open-world multiplayer economy MMO. Explore, gather, craft, trade, and build your empire." />
   <meta name="theme-color" content="#0b0e1a" />
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' fill='%230b0e1a'/><path d='M20 70 L50 20 L80 70 Z' fill='%237b5cf6'/><circle cx='50' cy='60' r='9' fill='%23a78bfa'/><rect x='50' y='52' width='7' height='16' fill='%23e0e7ff'/></svg>" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' fill='%230b0e1a'/><path d='M20 70 L50 20 L80 70 Z' fill='%237b5cf6'/><circle cx='50' cy='60' r='9' fill='%23a78bfa'/></svg>" />
   <title>Voidoria</title>
-  <link rel="stylesheet" href="css/style.css?v=20260901e" />
+  <link rel="stylesheet" href="css/style.css?v=2" />
 </head>
 <body>
 
-  <!-- ============ AUTH SCREEN ============ -->
+  <!-- ============ AUTH ============ -->
   <div id="auth-screen" class="screen">
     <div class="auth-bg"></div>
     <div class="auth-card">
       <div class="logo">
         <div class="logo-mark">
           <svg viewBox="0 0 100 100" width="72" height="72" aria-hidden="true">
-            <rect width="100" height="100" fill="transparent"/>
-            <defs><linearGradient id="vg" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0" stop-color="#7b5cf6"/><stop offset="1" stop-color="#312e81"/>
-            </linearGradient></defs>
             <path d="M20 72 L50 18 L80 72 Z" fill="url(#vg)"/>
             <circle cx="50" cy="62" r="10" fill="#a78bfa"/>
-            <rect x="50" y="53" width="8" height="18" fill="#e0e7ff"/>
           </svg>
+          <defs><linearGradient id="vg" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#7b5cf6"/><stop offset="1" stop-color="#312e81"/>
+          </linearGradient></defs>
         </div>
         <h1>VOIDORIA</h1>
-        <p class="tagline">SURVIVE&nbsp;&middot;&nbsp;BUILD&nbsp;&middot;&nbsp;BRAVE THE VOID</p>
+        <p class="tagline">EXPLORE &middot; CRAFT &middot; TRADE &middot; DOMINATE</p>
       </div>
-
       <div class="tabs">
         <button class="tab active" data-tab="login">Login</button>
         <button class="tab" data-tab="register">Register</button>
       </div>
-
       <form id="login-form" class="form active">
         <label>Username<input id="login-user" type="text" autocomplete="username" required /></label>
         <label>Password<input id="login-pass" type="password" autocomplete="current-password" required /></label>
         <button type="submit" class="btn primary">Enter Voidoria</button>
         <p class="form-msg" id="login-msg"></p>
       </form>
-
       <form id="register-form" class="form">
         <label>Username<input id="reg-user" type="text" autocomplete="username" minlength="3" maxlength="20" pattern="[A-Za-z0-9_]+" title="3-20 characters, letters/numbers/underscores" required /></label>
         <label>Password<input id="reg-pass" type="password" autocomplete="new-password" minlength="6" required /></label>
@@ -50,23 +45,21 @@
         <button type="submit" class="btn primary">Create Account</button>
         <p class="form-msg" id="register-msg"></p>
       </form>
-
-      <p class="legal">An original voxel sandbox. No affiliation with any existing game.</p>
+      <p class="legal">An open-world multiplayer economy MMO.</p>
     </div>
   </div>
 
-  <!-- ============ CHARACTER CUSTOMIZATION ============ -->
+  <!-- ============ CUSTOMIZATION ============ -->
   <div id="customize-screen" class="screen" style="display:none;">
     <div class="customize-stage">
       <div class="customize-left">
         <h2>FORGE YOUR <span>AVATAR</span></h2>
-        <p class="sub">Your appearance defines how you appear to the inhabitants of Voidoria.</p>
+        <p class="sub">Your appearance defines how you appear in Voidoria.</p>
         <canvas id="avatar-preview" width="240" height="360"></canvas>
         <button id="avatar-random" class="btn ghost">Randomize</button>
       </div>
       <div class="customize-right">
-        <div class="cc-group">
-          <h3>Skin</h3>
+        <div class="cc-group"><h3>Skin</h3>
           <div class="swatches" data-target="skinTone">
             <button class="sw" data-v="#e0ac69" style="background:#e0ac69"></button>
             <button class="sw" data-v="#f2c9a0" style="background:#f2c9a0"></button>
@@ -76,8 +69,7 @@
             <button class="sw" data-v="#5a3b8a" style="background:#5a3b8a"></button>
           </div>
         </div>
-        <div class="cc-group">
-          <h3>Hair</h3>
+        <div class="cc-group"><h3>Hair</h3>
           <div class="rowbtn">
             <button class="cbtn" data-field="hairStyle" data-v="short">Short</button>
             <button class="cbtn" data-field="hairStyle" data-v="long">Long</button>
@@ -93,28 +85,19 @@
             <button class="sw" data-v="#25337a" style="background:#25337a"></button>
           </div>
         </div>
-        <div class="cc-group">
-          <h3>Face</h3>
+        <div class="cc-group"><h3>Face</h3>
           <div class="rowbtn">
             <button class="cbtn" data-field="face" data-v="default">Default</button>
             <button class="cbtn" data-field="face" data-v="scar">Scarred</button>
             <button class="cbtn" data-field="face" data-v="mask">Masked</button>
           </div>
         </div>
-        <div class="cc-group">
-          <h3>Outfit</h3>
-          <label class="mini">Shirt
-            <input type="color" id="outfit-shirt" value="#2e7d9a" />
-          </label>
-          <label class="mini">Pants
-            <input type="color" id="outfit-pants" value="#3f4c66" />
-          </label>
-          <label class="mini">Shoes
-            <input type="color" id="outfit-shoes" value="#2b2b2b" />
-          </label>
+        <div class="cc-group"><h3>Outfit</h3>
+          <label class="mini">Shirt<input type="color" id="outfit-shirt" value="#2e7d9a" /></label>
+          <label class="mini">Pants<input type="color" id="outfit-pants" value="#3f4c66" /></label>
+          <label class="mini">Shoes<input type="color" id="outfit-shoes" value="#2b2b2b" /></label>
         </div>
-        <div class="cc-group">
-          <h3>Accessory</h3>
+        <div class="cc-group"><h3>Accessory</h3>
           <div class="rowbtn">
             <button class="cbtn" data-field="accessory" data-v="none">None</button>
             <button class="cbtn" data-field="accessory" data-v="necklace">Necklace</button>
@@ -131,10 +114,7 @@
   <div id="dashboard-screen" class="screen" style="display:none;">
     <div class="dashboard-bg"></div>
     <div class="dashboard-card">
-      <div class="logo">
-        <h1>VOIDORIA</h1>
-        <p class="tagline">SURVIVE &middot; BUILD &middot; BRAVE THE VOID</p>
-      </div>
+      <div class="logo"><h1>VOIDORIA</h1><p class="tagline">EXPLORE &middot; CRAFT &middot; TRADE &middot; DOMINATE</p></div>
       <div class="dash-greeting">Welcome back, <strong id="dash-name">Survivor</strong></div>
       <div class="dash-stats" id="dash-stats"></div>
       <button id="dashboard-play" class="btn primary big">&#9654; &nbsp;Enter Voidoria</button>
@@ -150,68 +130,36 @@
   <div id="game" style="display:none;">
     <canvas id="game-canvas"></canvas>
 
-    <!-- HUD -->
     <div id="hud">
       <div id="hud-topbar">
         <div class="brand">VOIDORIA</div>
-        <div id="hud-coords">0, 0, 0 &middot; Overworld</div>
-        <div id="hud-currency">$10,000</div>
+        <div id="hud-info"><span id="hud-coords">0,0</span> &middot; <span id="hud-region">Aurora</span></div>
         <div class="top-right">
+          <div id="hud-currency">$0</div>
+          <div id="hud-networth">NW $0</div>
+          <div id="hud-level">Lv 1</div>
           <button id="btn-menu" class="icon-btn" title="Menu">&#9776;</button>
           <button id="btn-chat-toggle" class="icon-btn" title="Chat">&#128172;</button>
         </div>
       </div>
       <div id="hud-bars">
-        <div class="bar-row health-row">
-          <span class="bar-icon">&#10084;</span>
-          <div class="bar"><div id="bar-health" class="fill health"></div></div>
-          <span id="health-num" class="bar-num">20</span>
-        </div>
-        <div class="bar-row hunger-row">
-          <span class="bar-icon">&#127831;</span>
-          <div class="bar"><div id="bar-hunger" class="fill hunger"></div></div>
-          <span id="hunger-num" class="bar-num">20</span>
-        </div>
         <div class="bar-row xp-row">
           <span class="bar-icon">&#11088;</span>
           <div class="bar"><div id="bar-xp" class="fill xp"></div></div>
-          <span id="level-num" class="bar-num">Lv 1</span>
         </div>
       </div>
-      <div id="hotbar">
-        <div class="hotbar-slot" data-hotbar="0"><span class="amt"></span></div>
-        <div class="hotbar-slot" data-hotbar="1"><span class="amt"></span></div>
-        <div class="hotbar-slot" data-hotbar="2"><span class="amt"></span></div>
-        <div class="hotbar-slot" data-hotbar="3"><span class="amt"></span></div>
-        <div class="hotbar-slot" data-hotbar="4"><span class="amt"></span></div>
-        <div class="hotbar-slot" data-hotbar="5"><span class="amt"></span></div>
-        <div class="hotbar-slot" data-hotbar="6"><span class="amt"></span></div>
-        <div class="hotbar-slot" data-hotbar="7"><span class="amt"></span></div>
-        <div class="hotbar-slot" data-hotbar="8"><span class="amt"></span></div>
-      </div>
     </div>
-
-    <!-- Crosshair -->
-    <div id="crosshair"></div>
-    <div id="block-highlight"></div>
 
     <!-- Chat -->
     <div id="chat">
       <div id="chat-messages"></div>
-      <input id="chat-input" type="text" placeholder="Press T to chat. Try /bounty /tpa /bal /shop" autocomplete="off" />
+      <input id="chat-input" type="text" placeholder="Press T to chat. Try /help" autocomplete="off" />
     </div>
 
     <!-- Notifications -->
     <div id="notifications"></div>
 
-    <!-- Teleport confirmations -->
-    <div id="tp-prompt" class="prompt" style="display:none;">
-      <p id="tp-prompt-text">Teleport request</p>
-      <button id="tp-accept" class="btn small primary">Accept</button>
-      <button id="tp-deny" class="btn small ghost">Deny</button>
-    </div>
-
-    <!-- Main menu overlay -->
+    <!-- Menu overlay -->
     <div id="menu-overlay" class="overlay" style="display:none;">
       <div class="menu-panel">
         <div class="menu-side">
@@ -219,48 +167,50 @@
           <div class="menu-nav">
             <button class="mnav active" data-panel="profile">Profile</button>
             <button class="mnav" data-panel="inventory">Inventory</button>
-            <button class="mnav" data-panel="shop">Shop</button>
+            <button class="mnav" data-panel="market">Market</button>
+            <button class="mnav" data-panel="shop">Shops</button>
             <button class="mnav" data-panel="auction">Auction House</button>
-            <button class="mnav" data-panel="teleport">Teleport</button>
-            <button class="mnav" data-panel="bounties">Bounties</button>
-            <button class="mnav" data-panel="homes">Homes</button>
-            <button class="mnav" data-panel="friends">Friends</button>
-            <button class="mnav" data-panel="settings">Settings</button>
-            <button class="mnav" data-panel="stats">Stats</button>
-            <button class="mnav" data-panel="void">The Void</button>
+            <button class="mnav" data-panel="production">Production</button>
+            <button class="mnav" data-panel="business">Business</button>
+            <button class="mnav" data-panel="construction">Construction</button>
+            <button class="mnav" data-panel="transport">Logistics</button>
+            <button class="mnav" data-panel="pvp">PvP &amp; Bounties</button>
+            <button class="mnav" data-panel="crates">Crates</button>
+            <button class="mnav" data-panel="social">Social &amp; Trade</button>
+            <button class="mnav" data-panel="leaderboards">Leaderboards</button>
+            <button class="mnav" data-panel="transactions">Transactions</button>
           </div>
           <button id="btn-logout" class="btn ghost">Logout</button>
         </div>
         <div class="menu-main">
           <div id="panel-profile" class="panel active"></div>
           <div id="panel-inventory" class="panel"></div>
+          <div id="panel-market" class="panel"></div>
           <div id="panel-shop" class="panel"></div>
           <div id="panel-auction" class="panel"></div>
-          <div id="panel-teleport" class="panel"></div>
-          <div id="panel-bounties" class="panel"></div>
-          <div id="panel-homes" class="panel"></div>
-          <div id="panel-friends" class="panel"></div>
-          <div id="panel-settings" class="panel"></div>
-          <div id="panel-stats" class="panel"></div>
-          <div id="panel-void" class="panel"></div>
+          <div id="panel-production" class="panel"></div>
+          <div id="panel-business" class="panel"></div>
+          <div id="panel-construction" class="panel"></div>
+          <div id="panel-transport" class="panel"></div>
+          <div id="panel-pvp" class="panel"></div>
+          <div id="panel-crates" class="panel"></div>
+          <div id="panel-social" class="panel"></div>
+          <div id="panel-leaderboards" class="panel"></div>
+          <div id="panel-transactions" class="panel"></div>
         </div>
         <button id="btn-close-menu" class="btn ghost">Resume (&lt;ESC&gt;)</button>
       </div>
     </div>
 
     <!-- Connecting overlay -->
-    <div id="connecting" class="overlay">
-      <div class="connecting-inner">
-        <div class="spin"></div>
-        <h2>Entering Voidoria...</h2>
-      </div>
+    <div id="connecting" class="overlay" style="display:none;">
+      <div class="connecting-inner"><div class="spin"></div><h2>Entering Voidoria...</h2></div>
     </div>
   </div>
 
-<script src="js/api.js?v=20260901e"></script>
-<script src="js/auth.js?v=20260901e"></script>
-<script src="js/customization.js?v=20260901e"></script>
-<script type="module" src="js/engine.js?v=20260901e"></script>
-<script type="module" src="js/game.js?v=20260901e"></script>
+<script src="js/api.js?v=2"></script>
+<script src="js/auth.js?v=2"></script>
+<script src="js/customization.js?v=2"></script>
+<script src="js/game.js?v=2"></script>
 </body>
 </html>
