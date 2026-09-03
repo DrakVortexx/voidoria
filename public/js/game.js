@@ -60,7 +60,7 @@
           <div class="stat-chip">Balance <b>$${num(snap.balance)}</b></div>
           <div class="stat-chip">Net Worth <b>$${num(snap.netWorth)}</b></div>
           <div class="stat-chip">Level <b>${st.level || 1}</b></div>
-          <div class="stat-chip">Region <b>${snap.profile?.region || "Aurora"}</b></div>`;
+          <div class="stat-chip">Region <b>${snap.profile?.region || "—"}</b></div>`;
         $("dashboard-msg").textContent = "";
       } catch (e) {
         $("dashboard-msg").textContent = "Could not load profile: " + e.message;
@@ -89,11 +89,57 @@
     return n.toLocaleString("en-US");
   }
 
+  /* ---------- canvas rendering helpers (non-pixel smooth) ---------- */
+  const SCALE = 40; // world units -> screen px mapping
+
+  function shade(hex, amt) {
+    hex = hex.replace("#", "");
+    if (hex.length === 3) hex = hex.split("").map((c) => c + c).join("");
+    const n = parseInt(hex, 16);
+    let r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+    r = Math.max(0, Math.min(255, r + amt));
+    g = Math.max(0, Math.min(255, g + amt));
+    b = Math.max(0, Math.min(255, b + amt));
+    return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+  }
+
+  function roundRectPath(ctx, x, y, w, h, r) {
+    r = Math.min(r, w / 2, h / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+  }
+
+  function hashSeed(str) {
+    let h = 2166136261;
+    for (let i = 0; i < str.length; i++) {
+      h ^= str.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return (h >>> 0) / 4294967296;
+  }
+
+  function makeRng(seedIn) {
+    let s = (seedIn >>> 0) || 1;
+    return () => {
+      s ^= s << 13; s ^= s >>> 17; s ^= s << 5; s >>>= 0;
+      return s / 4294967296;
+    };
+  }
+
   /* ================= 2D GAME ENGINE ================= */
   const Game = {
     canvas: null, ctx: null,
     state: {
-      x: 0, y: 0, region: "Aurora", balance: 0, netWorth: 0, level: 1, xp: 0,
+      x: 0, y: 0, region: "", balance: 0, netWorth: 0, level: 1, xp: 0,
       inventory: [], crates: [], regions: [], bounds: { minX: -400, maxX: 400, minY: -400, maxY: 400 },
     },
     keys: {}, camera: { x: 0, y: 0 }, anim: 0,
@@ -114,6 +160,7 @@
       Game.state.xp = snap.stats?.xp || 0;
       Game.state.x = snap.profile?.posX || 0;
       Game.state.y = snap.profile?.posY || 0;
+      Game.state.region = snap.profile?.region || "";
       if (meta.world) Game.state.bounds = meta.world;
 
       try { const r = await API.world.regions(); Game.state.regions = r.regions || []; Game.state.spawn = r.spawn || { x: 0, y: 0 }; } catch (_) {}
@@ -231,16 +278,6 @@
       requestAnimationFrame(Game.loop);
     },
 
-    regionColor(r) {
-      const map = {
-        CITY: "#222a44", COMMERCIAL: "#2f2a52", INDUSTRIAL: "#2a2f3a",
-        TOWN: "#26304a", FOREST: "#1f3a22", MOUNTAIN: "#3a352c",
-        RESOURCE: "#3a3426", AGRI: "#2c3a20", LAKE: "#16304a",
-        RIVER: "#1a3a52", WILDERNESS: "#2c2c30",
-      };
-      return map[r.kind] || "#2c2c30";
-    },
-
     regionName(r) {
       const colors = { FOREST: "#6fd94a", MOUNTAIN: "#d9a25c", AGRI: "#d9c15c", LAKE: "#5a9fd6", RIVER: "#5a9fd6", RESOURCE: "#e0b64a", CITY: "#a78bfa", COMMERCIAL: "#a78bfa", INDUSTRIAL: "#90a0c0", TOWN: "#7bd0c0", WILDERNESS: "#9aa0a8" };
       return colors[r.kind] || "#ccc";
@@ -250,81 +287,353 @@
       const ctx = Game.ctx;
       const W = Game.canvas.width, H = Game.canvas.height;
       const cx = Game.state.x, cy = Game.state.y;
-      const scale = 40; // world-units -> tile mapping approx (1 unit ~ 1 tile)
+      const X = (wx) => (wx - cx) * SCALE + W / 2;
+      const Y = (wy) => (wy - cy) * SCALE + H / 2;
 
-      // background
-      ctx.fillStyle = "#141824";
+      // base ground gradient (deep night-sky ground)
+      const bg = ctx.createRadialGradient(W / 2, H / 2, 40, W / 2, H / 2, Math.max(W, H) * 0.72);
+      bg.addColorStop(0, "#1c2333");
+      bg.addColorStop(1, "#0c1016");
+      ctx.fillStyle = bg;
       ctx.fillRect(0, 0, W, H);
 
-      // grid
-      ctx.strokeStyle = "rgba(255,255,255,0.04)";
-      ctx.lineWidth = 1;
-      for (let gx = Math.floor(cx - W / 2 / scale); gx <= cx + W / 2 / scale; gx++) {
-        const sx = (gx - cx) * scale + W / 2;
-        ctx.beginPath(); ctx.moveTo(sx, 0); ctx.lineTo(sx, H); ctx.stroke();
-      }
-      for (let gy = Math.floor(cy - H / 2 / scale); gy <= cy + H / 2 / scale; gy++) {
-        const sy = (gy - cy) * scale + H / 2;
-        ctx.beginPath(); ctx.moveTo(0, sy); ctx.lineTo(W, sy); ctx.stroke();
+      // faint world boundary
+      const b = Game.state.bounds || { minX: -400, minY: -400, maxX: 400, maxY: 400 };
+      ctx.strokeStyle = "rgba(255,255,255,0.07)";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([12, 16]);
+      ctx.strokeRect(X(b.minX), Y(b.minY), (b.maxX - b.minX) * SCALE, (b.maxY - b.minY) * SCALE);
+      ctx.setLineDash([]);
+
+      // regions (city-sized first so sub-regions draw on top)
+      const ordered = [...Game.state.regions].sort((a, r2) => r2.radius - a.radius);
+      for (const r of ordered) {
+        const rx = X(r.x), ry = Y(r.y);
+        if (Math.abs(rx - W / 2) > W / 2 + r.radius * SCALE || Math.abs(ry - H / 2) > H / 2 + r.radius * SCALE) continue;
+        this.drawRegion(r, rx, ry);
       }
 
-      // regions (draw all, subtle)
-      for (const r of Game.state.regions) {
-        const rx = (r.x - cx) * scale + W / 2;
-        const ry = (r.y - cy) * scale + H / 2;
-        if (Math.abs(rx) > W + r.radius * scale || Math.abs(ry) > H + r.radius * scale) continue;
-        ctx.globalAlpha = 0.16;
-        ctx.fillStyle = Game.regionColor(r);
-        ctx.beginPath(); ctx.arc(rx, ry, r.radius * scale, 0, Math.PI * 2); ctx.fill();
-        ctx.globalAlpha = 1;
-        ctx.fillStyle = Game.regionName(r);
-        ctx.font = "11px sans-serif";
-        ctx.fillText(r.name, rx + 6, ry - 6);
-      }
+      // roads connecting key settlements
+      this.drawRoads(ordered);
 
-      // spawn marker
+      // spawn beacon
       if (Game.state.spawn) {
-        const sx = (Game.state.spawn.x - cx) * scale + W / 2;
-        const sy = (Game.state.spawn.y - cy) * scale + H / 2;
-        ctx.fillStyle = "#7b5cf6";
-        ctx.beginPath(); ctx.arc(sx, sy, 8, 0, Math.PI * 2); ctx.fill();
+        const sx = X(Game.state.spawn.x), sy = Y(Game.state.spawn.y);
+        if (sx > -30 && sy > -30 && sx < W + 30 && sy < H + 30) {
+          ctx.strokeStyle = "rgba(123,92,246,0.5)";
+          ctx.lineWidth = 3;
+          ctx.beginPath(); ctx.arc(sx, sy, 16 + Math.sin(Game.anim * 1.5) * 4, 0, Math.PI * 2); ctx.stroke();
+          ctx.fillStyle = "#a78bfa";
+          ctx.beginPath(); ctx.arc(sx, sy, 5, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = "rgba(255,255,255,0.85)";
+          ctx.font = "10px sans-serif";
+          ctx.textAlign = "center";
+          ctx.fillText("Spawn", sx, sy - 24);
+          ctx.textAlign = "start";
+        }
       }
 
-      // resource nodes near player
+      // resource nodes
       try {
-        const nodes = await API.world.nodes(cx, cy, 30);
+        const nodes = await API.world.nodes(cx, cy, 40);
         for (const n of nodes) {
-          const nx = (n.x - cx) * scale + W / 2;
-          const ny = (n.y - cy) * scale + H / 2;
-          if (nx < -20 || ny < -20 || nx > W + 20 || ny > H + 20) continue;
-          const col = DECOR[n.itemDef] || "#888";
-          ctx.fillStyle = col;
-          ctx.beginPath();
-          ctx.arc(nx, ny + Math.sin(Game.anim + nx) * 3, 7, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.strokeStyle = "rgba(255,255,255,0.25)";
-          ctx.stroke();
-          ctx.fillStyle = "#eee";
-          ctx.font = "9px sans-serif";
-          ctx.fillText(n.icon, nx + 11, ny + 4);
+          const nx = X(n.x), ny = Y(n.y);
+          if (nx < -40 || ny < -40 || nx > W + 40 || ny > H + 40) continue;
+          this.drawNode(n, nx, ny);
         }
         Game.state.nearbyNodes = (await API.world.nodes(cx, cy)).slice(0, 6);
       } catch (_) {}
 
-      // other players (socket presence, simplified)
+      // other online players
       for (const other of Object.values(Game.entries)) {
-        const ox = (other.x - cx) * scale + W / 2;
-        const oy = (other.y - cy) * scale + H / 2;
-        ctx.fillStyle = "#e0a54a";
-        ctx.beginPath(); ctx.arc(ox, oy, 6, 0, Math.PI * 2); ctx.fill();
-        ctx.fillStyle = "#fff"; ctx.font = "9px sans-serif"; ctx.fillText(other.name, ox + 8, oy + 4);
+        this.drawCharacter(X(other.x), Y(other.y), 9, other.name, "#e0a54a");
+      }
+
+      // the player
+      this.drawCharacter(W / 2, H / 2, 13, null, "#7b5cf6");
+
+      // ambient vignette
+      const v = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.32, W / 2, H / 2, Math.max(W, H) * 0.72);
+      v.addColorStop(0, "rgba(0,0,0,0)");
+      v.addColorStop(1, "rgba(0,0,0,0.5)");
+      ctx.fillStyle = v;
+      ctx.fillRect(0, 0, W, H);
+
+      this.drawMinimap();
+    },
+
+    drawMinimap() {
+      const mm = $("minimap");
+      if (!mm) return;
+      const mctx = mm.getContext("2d");
+      const size = mm.width, pad = 8;
+      mctx.clearRect(0, 0, size, size);
+      mctx.fillStyle = "rgba(10,13,22,0.9)";
+      mctx.fillRect(0, 0, size, size);
+
+      const b = Game.state.bounds || { minX: -400, minY: -400, maxX: 400, maxY: 400 };
+      const span = Math.max(b.maxX - b.minX, b.maxY - b.minY);
+      const k = (size - pad * 2) / span;
+      const X = (wx) => pad + (wx - b.minX) * k;
+      const Y = (wy) => pad + (wy - b.minY) * k;
+
+      // world boundary
+      mctx.strokeStyle = "rgba(255,255,255,0.25)";
+      mctx.lineWidth = 1;
+      mctx.strokeRect(X(b.minX), Y(b.minY), span * k, span * k);
+
+      // regions
+      for (const r of Game.state.regions) {
+        const pal = this.regionPalete(r.kind);
+        mctx.globalAlpha = 0.85;
+        mctx.fillStyle = pal[0];
+        mctx.beginPath(); mctx.arc(X(r.x), Y(r.y), Math.max(3, r.radius * k), 0, Math.PI * 2); mctx.fill();
+        mctx.globalAlpha = 1;
+        mctx.fillStyle = "rgba(255,255,255,0.55)";
+        mctx.font = "7px system-ui, sans-serif";
+        mctx.textAlign = "center";
+        mctx.fillText(r.name, X(r.x), Y(r.y));
+        mctx.textAlign = "start";
       }
 
       // player
-      const px = W / 2, py = H / 2;
-      ctx.fillStyle = "#7b5cf6";
-      ctx.beginPath(); ctx.arc(px, py, 8, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.stroke();
+      mctx.fillStyle = "#fff";
+      mctx.beginPath(); mctx.arc(X(Game.state.x), Y(Game.state.y), 3, 0, Math.PI * 2); mctx.fill();
+      mctx.strokeStyle = "#7b5cf6";
+      mctx.lineWidth = 2;
+      mctx.beginPath(); mctx.arc(X(Game.state.x), Y(Game.state.y), 3, 0, Math.PI * 2); mctx.stroke();
+    },
+
+    regionPalete(kind) {
+      return {
+        CITY: ["#39456b", "#202a45", "#93a5e8"],
+        COMMERCIAL: ["#3a3b6b", "#23245c", "#a59df0"],
+        INDUSTRIAL: ["#3a3f4a", "#22262e", "#98a3b8"],
+        TOWN: ["#33506b", "#1f3144", "#7fb8d8"],
+        FOREST: ["#1f4a2e", "#10301c", "#57a566"],
+        MOUNTAIN: ["#4a4440", "#2c2926", "#a89c90"],
+        RESOURCE: ["#4a4a3a", "#2c2c22", "#c9b26a"],
+        AGRI: ["#3a5a26", "#223a16", "#a8c457"],
+        LAKE: ["#1f5f8f", "#12325a", "#6fc3e8"],
+        RIVER: ["#1f5f8f", "#143d66", "#6fc3e8"],
+        WILDERNESS: ["#2b3a2a", "#18241a", "#6f8f5c"],
+      }[kind] || ["#2b3a2a", "#18241a", "#6f8f5c"];
+    },
+
+    drawRegion(r, rx, ry) {
+      const ctx = this.ctx;
+      const R = r.radius * SCALE;
+      const pal = this.regionPalete(r.kind);
+      const g = ctx.createRadialGradient(rx, ry, R * 0.12, rx, ry, R);
+      g.addColorStop(0, pal[0]);
+      g.addColorStop(1, pal[1]);
+      ctx.globalAlpha = 0.94;
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(rx, ry, R, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = pal[2];
+      ctx.lineWidth = 2.5;
+      ctx.globalAlpha = 0.55;
+      ctx.beginPath(); ctx.arc(rx, ry, R, 0, Math.PI * 2); ctx.stroke();
+      ctx.globalAlpha = 0.16;
+      ctx.lineWidth = 10;
+      ctx.beginPath(); ctx.arc(rx, ry, R, 0, Math.PI * 2); ctx.stroke();
+      ctx.globalAlpha = 1;
+
+      this.decorateRegion(r, rx, ry);
+      ctx.fillStyle = this.regionName(r);
+      ctx.font = "bold 12px system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.shadowColor = "rgba(0,0,0,0.6)";
+      ctx.shadowBlur = 6;
+      ctx.fillText(r.name, rx, ry - R - 10);
+      ctx.shadowBlur = 0;
+      ctx.textAlign = "start";
+    },
+
+    decorateRegion(r, rx, ry) {
+      const ctx = this.ctx;
+      const rand = makeRng(Math.floor(hashSeed(r.key) * 0xffffffff));
+      const Rc = r.radius * SCALE;
+      const kind = r.kind;
+
+      const place = (i) => {
+        const a = rand() * Math.PI * 2;
+        const rad = (0.22 + rand() * 0.7) * Rc;
+        return { x: rx + Math.cos(a) * rad, y: ry + Math.sin(a) * rad };
+      };
+
+      if (kind === "CITY" || kind === "TOWN" || kind === "COMMERCIAL" || kind === "INDUSTRIAL") {
+        const n = 16 + Math.floor(rand() * 10);
+        for (let i = 0; i < n; i++) {
+          const p = place(i);
+          const bw = (0.5 + rand() * 0.85) * SCALE;
+          const bh = (0.5 + rand() * 0.55) * SCALE;
+          ctx.fillStyle = shade("#4d5670", Math.floor(rand() * 20) - 9);
+          roundRectPath(ctx, p.x - bw / 2, p.y - bh / 2, bw, bh, 5);
+          ctx.fill();
+          ctx.fillStyle = "rgba(255,255,255,0.08)";
+          roundRectPath(ctx, p.x - bw / 2, p.y - bh / 2, bw, bh * 0.4, 5);
+          ctx.fill();
+          if (rand() < 0.4) {
+            ctx.fillStyle = shade("#e8c25c", Math.floor(rand() * 14) - 7);
+            ctx.beginPath(); ctx.arc(p.x, p.y - bh / 2 - 1, 1.6, 0, Math.PI * 2); ctx.fill();
+          }
+        }
+        return;
+      }
+
+      if (kind === "FOREST") {
+        const n = 16 + Math.floor(rand() * 14);
+        for (let i = 0; i < n; i++) {
+          const p = place(i);
+          const sz = (0.5 + rand() * 0.45) * SCALE * 0.5;
+          ctx.fillStyle = "#16351f";
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, sz, 0, Math.PI * 2);
+          ctx.arc(p.x + sz * 0.8, p.y + sz * 0.3, sz * 0.7, 0, Math.PI * 2);
+          ctx.arc(p.x - sz * 0.8, p.y + sz * 0.3, sz * 0.7, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = "#2e6b3c";
+          ctx.beginPath(); ctx.arc(p.x, p.y, sz * 0.62, 0, Math.PI * 2); ctx.fill();
+        }
+        return;
+      }
+
+      if (kind === "MOUNTAIN") {
+        const n = 8 + Math.floor(rand() * 8);
+        for (let i = 0; i < n; i++) {
+          const p = place(i);
+          const w = (0.7 + rand() * 0.9) * SCALE * 1.3;
+          const h = (0.5 + rand() * 0.7) * SCALE;
+          ctx.fillStyle = shade("#5b554c", Math.floor(rand() * 18) - 9);
+          ctx.beginPath();
+          ctx.moveTo(p.x - w / 2, p.y + h / 2);
+          ctx.quadraticCurveTo(p.x, p.y - h, p.x + w / 2, p.y + h / 2);
+          ctx.closePath(); ctx.fill();
+          ctx.fillStyle = "#8f877b";
+          ctx.beginPath();
+          ctx.moveTo(p.x - w * 0.22, p.y - h * 0.28);
+          ctx.quadraticCurveTo(p.x, p.y - h + 4, p.x + w * 0.22, p.y - h * 0.28);
+          ctx.closePath(); ctx.fill();
+        }
+        return;
+      }
+
+      if (kind === "AGRI") {
+        for (let rowIdx = 0; rowIdx < 8; rowIdx++) {
+          const y = ry + (rowIdx - 3.5) * SCALE * 1.9;
+          ctx.strokeStyle = shade("#7fae3f", (rowIdx % 2 ? 6 : -8));
+          ctx.lineWidth = SCALE * 0.22;
+          ctx.beginPath();
+          ctx.moveTo(rx - Rc * 0.85, y);
+          ctx.lineTo(rx + Rc * 0.85, y);
+          ctx.stroke();
+        }
+        return;
+      }
+
+      if (kind === "LAKE" || kind === "RIVER") {
+        ctx.strokeStyle = "rgba(255,255,255,0.2)";
+        ctx.lineWidth = 2;
+        for (let i = 0; i < 6; i++) {
+          const y = ry + (i - 2.5) * SCALE * 1.3;
+          ctx.beginPath();
+          for (let dx = -Rc * 0.75; dx <= Rc * 0.75; dx += 4) {
+            const sx = rx + dx;
+            const sy = y + Math.sin((dx + Game.anim * 50) / SCALE) * 2.5;
+            if (dx === -Rc * 0.75) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy);
+          }
+          ctx.stroke();
+        }
+        return;
+      }
+
+      if (kind === "WILDERNESS" || kind === "RESOURCE") {
+        const n = 14 + Math.floor(rand() * 12);
+        for (let i = 0; i < n; i++) {
+          const p = place(i);
+          ctx.strokeStyle = "#5f7a4a";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(p.x, p.y);
+          ctx.lineTo(p.x - 4, p.y - 9);
+          ctx.moveTo(p.x, p.y);
+          ctx.lineTo(p.x + 4, p.y - 9);
+          ctx.stroke();
+        }
+      }
+    },
+
+    drawRoads(regs) {
+      const ctx = this.ctx;
+      const stars = regs.filter((r) => r.kind === "CITY" || r.kind === "TOWN" || r.kind === "COMMERCIAL" || r.kind === "INDUSTRIAL" || r.kind === "AGRI");
+      if (stars.length < 2) return;
+      ctx.lineCap = "round";
+      for (let i = 0; i < stars.length; i++) {
+        for (let j = i + 1; j < stars.length; j++) {
+          const a = stars[i], c = stars[j];
+          const X = (wx) => (wx - Game.state.x) * SCALE + Game.canvas.width / 2;
+          const Y = (wy) => (wy - Game.state.y) * SCALE + Game.canvas.height / 2;
+          ctx.strokeStyle = "rgba(210,190,140,0.28)";
+          ctx.lineWidth = 5;
+          ctx.beginPath(); ctx.moveTo(X(a.x), Y(a.y)); ctx.lineTo(X(c.x), Y(c.y)); ctx.stroke();
+          ctx.strokeStyle = "rgba(235,220,175,0.35)";
+          ctx.lineWidth = 2;
+          ctx.setLineDash([6, 8]);
+          ctx.beginPath(); ctx.moveTo(X(a.x), Y(a.y)); ctx.lineTo(X(c.x), Y(c.y)); ctx.stroke();
+          ctx.setLineDash([]);
+        }
+      }
+    },
+
+    drawNode(n, nx, ny) {
+      const ctx = this.ctx;
+      const col = DECOR[n.itemDef] || "#9aa0a8";
+      const hover = Math.sin(Game.anim * 2 + nx) * 2;
+      ctx.fillStyle = "rgba(0,0,0,0.3)";
+      ctx.beginPath(); ctx.ellipse(nx, ny + 10, 8, 3, 0, 0, Math.PI * 2); ctx.fill();
+      const g = ctx.createRadialGradient(nx, ny - 5 + hover, 2, nx, ny + hover, 9);
+      g.addColorStop(0, shade(col, 45));
+      g.addColorStop(1, col);
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(nx, ny + hover, 9, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = "rgba(255,255,255,0.35)";
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.fillStyle = "#fff";
+      ctx.font = "9px system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(n.icon, nx, ny + hover + 3);
+      ctx.textAlign = "start";
+    },
+
+    drawCharacter(x, y, s, name, color) {
+      const ctx = this.ctx;
+      ctx.fillStyle = "rgba(0,0,0,0.35)";
+      ctx.beginPath(); ctx.ellipse(x, y + s * 1.05, s * 0.9, s * 0.34, 0, 0, Math.PI * 2); ctx.fill();
+      const bodyG = ctx.createLinearGradient(x, y - s * 0.1, x, y + s * 1.1);
+      bodyG.addColorStop(0, color);
+      bodyG.addColorStop(1, shade(color, -30));
+      ctx.fillStyle = bodyG;
+      roundRectPath(ctx, x - s * 0.52, y - s * 0.28, s * 1.04, s * 1.35, s * 0.5);
+      ctx.fill();
+      ctx.fillStyle = "#f2c99b";
+      ctx.beginPath(); ctx.arc(x, y - s * 0.85, s * 0.52, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = shade(color, -40);
+      ctx.beginPath(); ctx.arc(x, y - s * 0.9, s * 0.52, Math.PI * 0.95, Math.PI * 2.05); ctx.fill();
+      ctx.strokeStyle = "rgba(255,255,255,0.4)";
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(x, y - s * 0.85, s * 0.52, 0, Math.PI * 2); ctx.stroke();
+      if (name) {
+        ctx.fillStyle = "#fff";
+        ctx.font = "11px system-ui, sans-serif";
+        ctx.textAlign = "center";
+        ctx.shadowColor = "rgba(0,0,0,0.7)"; ctx.shadowBlur = 4;
+        ctx.fillText(name, x, y + s * 2.0);
+        ctx.shadowBlur = 0;
+        ctx.textAlign = "start";
+      }
     },
 
     // ---------- Gathering ----------
@@ -359,6 +668,8 @@
       $("hud-currency").textContent = "$" + num(Game.state.balance);
       $("hud-networth").textContent = "NW $" + num(Game.state.netWorth);
       $("hud-level").textContent = "Lv " + Game.state.level;
+      $("hud-coords").textContent = `${Math.round(Game.state.x)},${Math.round(Game.state.y)}`;
+      $("hud-region").textContent = Game.state.region || "—";
       const xpInLevel = Game.state.xp % 100;
       $("bar-xp").style.width = Math.min(100, xpInLevel) + "%";
     },
