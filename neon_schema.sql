@@ -1,37 +1,48 @@
-﻿-- ============================================================================
--- VOIDORIA — Neon PostgreSQL schema (mirror of prisma/schema.prisma)
--- Generated via `prisma migrate diff --from-empty`.
--- Applying this file to a NON-empty database will DROP all game tables first.
--- ============================================================================
-DROP TABLE IF EXISTS "resource_nodes" CASCADE;
-DROP TABLE IF EXISTS "world_regions" CASCADE;
-DROP TABLE IF EXISTS "crates" CASCADE;
-DROP TABLE IF EXISTS "player_stats" CASCADE;
+-- ======================================================================
+-- VOIDORIA - FULL REBUILD (drop ALL tables, then recreate from prisma/schema.prisma)
+-- Safe to run repeatedly on any environment (dev or production).
+-- ======================================================================
+BEGIN;
+DROP TABLE IF EXISTS "auction_bids" CASCADE;
+DROP TABLE IF EXISTS "auction_listings" CASCADE;
+DROP TABLE IF EXISTS "auctions" CASCADE;
+DROP TABLE IF EXISTS "balances" CASCADE;
 DROP TABLE IF EXISTS "bounties" CASCADE;
-DROP TABLE IF EXISTS "trades" CASCADE;
-DROP TABLE IF EXISTS "trade_offers" CASCADE;
-DROP TABLE IF EXISTS "delivery_jobs" CASCADE;
-DROP TABLE IF EXISTS "transport_contracts" CASCADE;
+DROP TABLE IF EXISTS "bounty_targets" CASCADE;
 DROP TABLE IF EXISTS "buildings" CASCADE;
-DROP TABLE IF EXISTS "properties" CASCADE;
-DROP TABLE IF EXISTS "production_jobs" CASCADE;
-DROP TABLE IF EXISTS "production_facilities" CASCADE;
 DROP TABLE IF EXISTS "business_members" CASCADE;
 DROP TABLE IF EXISTS "businesses" CASCADE;
-DROP TABLE IF EXISTS "auction_bids" CASCADE;
-DROP TABLE IF EXISTS "auctions" CASCADE;
-DROP TABLE IF EXISTS "shop_listings" CASCADE;
-DROP TABLE IF EXISTS "shops" CASCADE;
-DROP TABLE IF EXISTS "shop_plots" CASCADE;
-DROP TABLE IF EXISTS "price_points" CASCADE;
-DROP TABLE IF EXISTS "market_orders" CASCADE;
-DROP TABLE IF EXISTS "transactions" CASCADE;
-DROP TABLE IF EXISTS "inventory_stacks" CASCADE;
+DROP TABLE IF EXISTS "crates" CASCADE;
+DROP TABLE IF EXISTS "delivery_jobs" CASCADE;
 DROP TABLE IF EXISTS "friendships" CASCADE;
-DROP TABLE IF EXISTS "player_settings" CASCADE;
+DROP TABLE IF EXISTS "inventory_stacks" CASCADE;
+DROP TABLE IF EXISTS "market_orders" CASCADE;
+DROP TABLE IF EXISTS "pending_teleports" CASCADE;
+DROP TABLE IF EXISTS "player_homes" CASCADE;
 DROP TABLE IF EXISTS "player_profiles" CASCADE;
+DROP TABLE IF EXISTS "player_settings" CASCADE;
+DROP TABLE IF EXISTS "player_stats" CASCADE;
+DROP TABLE IF EXISTS "player_stats_2" CASCADE;
+DROP TABLE IF EXISTS "price_points" CASCADE;
+DROP TABLE IF EXISTS "production_facilities" CASCADE;
+DROP TABLE IF EXISTS "production_jobs" CASCADE;
+DROP TABLE IF EXISTS "properties" CASCADE;
+DROP TABLE IF EXISTS "resource_nodes" CASCADE;
 DROP TABLE IF EXISTS "sessions" CASCADE;
+DROP TABLE IF EXISTS "shop_categories" CASCADE;
+DROP TABLE IF EXISTS "shop_items" CASCADE;
+DROP TABLE IF EXISTS "shop_listings" CASCADE;
+DROP TABLE IF EXISTS "shop_plots" CASCADE;
+DROP TABLE IF EXISTS "shops" CASCADE;
+DROP TABLE IF EXISTS "stasis_chambers" CASCADE;
+DROP TABLE IF EXISTS "trade_offers" CASCADE;
+DROP TABLE IF EXISTS "trades" CASCADE;
+DROP TABLE IF EXISTS "transactions" CASCADE;
+DROP TABLE IF EXISTS "transport_contracts" CASCADE;
 DROP TABLE IF EXISTS "users" CASCADE;
+DROP TABLE IF EXISTS "world_chunks" CASCADE;
+DROP TABLE IF EXISTS "world_regions" CASCADE;
+
 -- CreateTable
 CREATE TABLE "users" (
     "id" TEXT NOT NULL,
@@ -656,4 +667,4 @@ ALTER TABLE "player_stats" ADD CONSTRAINT "player_stats_player_id_fkey" FOREIGN 
 -- AddForeignKey
 ALTER TABLE "crates" ADD CONSTRAINT "crates_player_id_fkey" FOREIGN KEY ("player_id") REFERENCES "player_profiles"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
-
+COMMIT;
